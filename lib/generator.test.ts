@@ -50,6 +50,14 @@ function audit(p:Plan){
     assert.ok(doors.some(isCirculation),`${p.settings.seed}: ${r.name} has no door onto circulation`);
   }
   assert.ok(p.navigation.loops>=1,`${p.settings.seed}: the doors form a bare tree with only one route to everywhere`);
+  // The chapel is entered from its antechapel or a passage, never from a kitchen, a store or a bedchamber.
+  for(const [a,b] of p.connections){
+    const [m,n]=[a,b].map(id=>p.rooms.find(r=>r.id===id)!);
+    if(!m||!n)continue;
+    const kinds=[m.kind,n.kind];
+    if(kinds.includes('sacred'))assert.ok(kinds.every(k=>k==='sacred'||['circulation','stairs','gallery','hall'].includes(k)),`${p.settings.seed}: a door joins ${m.name} to ${n.name}`);
+    assert.ok(!(kinds.includes('bedroom')&&(kinds.includes('service')||kinds.includes('hall'))),`${p.settings.seed}: a door joins ${m.name} to ${n.name}`);
+  }
   for(const f of p.floors){
     const layer=grid.layer(f.elevation+2);let count=0;
     for(const run of layer.runs)for(let x=run.x;x<run.x+run.length;x++){assert.equal(grid.material(x,layer.y,run.z),run.material);count++;}

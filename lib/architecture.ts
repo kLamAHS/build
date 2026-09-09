@@ -355,13 +355,20 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     edge.priority=-1;
   };
   for(const st of p.stairs){p.connections.push(st.roomIds as [string,string]);join(st.roomIds[0],st.roomIds[1]);for(const id of st.roomIds)degree.set(id,degree.get(id)!+1);}
-  const wide=(m:typeof candidates[number],n:typeof candidates[number])=>n.span-m.span||m.a.id.localeCompare(n.a.id);
+  const wide=(m:typeof candidates[number],n:typeof candidates[number])=>n.span-m.span||m.a.id.localeCompare(n.a.id)||m.b.id.localeCompare(n.b.id);
   const open=(e:typeof candidates[number])=>e.priority>=0;
+  // Doors a household would never have cut. Service reaches the hall through the screens passage, not
+  // through the hall body; nothing opens off the chapel but its antechapel; a bedchamber is not a back door.
+  const IMPROPER:Partial<Record<RoomKind,RoomKind[]>>={hall:['service','storage','bedroom'],sacred:['service','storage','bedroom','study'],bedroom:['service','bedroom','sacred','hall'],service:['hall','sacred','bedroom'],storage:['hall','sacred'],study:['sacred']};
+  const improper=(e:typeof candidates[number])=>(IMPROPER[e.a.kind]??[]).includes(e.b.kind)||(IMPROPER[e.b.kind]??[]).includes(e.a.kind);
+  const proper=(e:typeof candidates[number])=>open(e)&&!improper(e);
   // 1. The circulation skeleton: passages, stairs, galleries and the hall joined into one network.
   const spine=candidates.filter(e=>isCirculation(e.a)&&isCirculation(e.b)).sort(wide);
   for(const edge of spine)if(find(edge.a.id)!==find(edge.b.id))cut(edge);
-  // 2. Every other room gets its own door onto that network, so no chamber is ever a corridor.
-  for(const edge of candidates.filter(e=>open(e)&&(isCirculation(e.a)!==isCirculation(e.b))).sort(wide)){
+  // 2. Every other room gets its own door onto that network, so no chamber is ever a corridor. The hall
+  //    counts as circulation to cross, but not as a doorway for the kitchens, so proper doors go first.
+  const onto=(e:typeof candidates[number])=>isCirculation(e.a)!==isCirculation(e.b);
+  for(const only of [proper,open])for(const edge of candidates.filter(e=>only(e)&&onto(e)).sort(wide)){
     const chamber=isCirculation(edge.a)?edge.b:edge.a;
     if(toCirculation.get(chamber.id)!)continue;
     cut(edge);
@@ -369,14 +376,15 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   // 3. Anything still cut off is joined by the least objectionable door left. A route forced through a
   //    steward's office is a compromise; the same route through a bedchamber is not one worth making.
   const intrusion=(e:typeof candidates[number])=>(isCirculation(e.a)?0:ROOM_PRIVACY[e.a.kind])+(isCirculation(e.b)?0:ROOM_PRIVACY[e.b.kind]);
-  for(const edge of candidates.filter(open).sort((m,n)=>intrusion(m)-intrusion(n)||wide(m,n))){
+  const byIntrusion=(m:typeof candidates[number],n:typeof candidates[number])=>intrusion(m)-intrusion(n)||wide(m,n);
+  for(const only of [proper,open])for(const edge of candidates.filter(only).sort(byIntrusion)){
     if(find(edge.a.id)!==find(edge.b.id))cut(edge);
   }
   // 4. Doors a designer would add between rooms that already have their own entrance: a kitchen into its
   //    pantry, a solar into the withdrawing room. Both sides keep an independent way in, so neither becomes a route.
   const PAIRED:Record<string,string[]>={Kitchen:['Pantry & buttery','Scullery','Larder','Wet larder','Bread oven'],Solar:['Withdrawing room','Parlour'],Bedchamber:['Wardrobe','Wardrobe & study','Linen room'],'Gabled bedchamber':['Wardrobe & study'],Workshop:['Goods store','Tool store','Counting room'],Guardroom:['Armoury','Watch room'],'Tower chamber':['Wardrobe','Antechamber'],'Solar chamber':['Wardrobe','Antechamber']};
   const paired=(m:Room,n:Room)=>(PAIRED[m.name]??[]).includes(n.name)||(PAIRED[n.name]??[]).includes(m.name);
-  for(const edge of candidates.filter(e=>open(e)&&paired(e.a,e.b)).sort(wide)){
+  for(const edge of candidates.filter(e=>proper(e)&&paired(e.a,e.b)).sort(wide)){
     if(toCirculation.get(edge.a.id)!&&toCirculation.get(edge.b.id)!)cut(edge);
   }
   // 5. Loop closure. A plan whose doors form a bare tree forces one route to everywhere; a real house
@@ -413,8 +421,9 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       let relieved=false;
       for(const [id,strands] of forced){
         const stranded=new Set(strands);
-        const relief=candidates.filter(open).filter(e=>e.a.id!==id&&e.b.id!==id&&stranded.has(e.a.id)!==stranded.has(e.b.id))
-          .sort((m,n)=>intrusion(m)-intrusion(n)||wide(m,n))[0];
+        const reaches=(e:typeof candidates[number])=>e.a.id!==id&&e.b.id!==id&&stranded.has(e.a.id)!==stranded.has(e.b.id);
+        const relief=candidates.filter(e=>proper(e)&&reaches(e)).sort(byIntrusion)[0]
+          ??candidates.filter(e=>open(e)&&reaches(e)).sort(byIntrusion)[0];
         if(relief){cut(relief);relieved=true;}
       }
       if(!relieved)break;
