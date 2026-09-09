@@ -147,3 +147,30 @@ test('every family builds across the size and storey range, including chamfered 
   }
   assert.deepEqual(failures,[]);
 });
+test('chambers are furnished, lit and private: a bed to sleep in and no second way through',()=>{
+  // Regressions caught after the circulation work: a fixed 3x4 bed and a door clearance reaching seven
+  // blocks through the wall left 27% of bedchambers empty, and extra doors turned 16% into shortcuts.
+  let bedrooms=0,bare=0,shortcuts=0,windowless=0,landlocked=0;
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    const byId=new Map(p.rooms.map(r=>[r.id,r]));
+    const lit=new Set(p.openings.filter(o=>o.type==='window').flatMap(o=>o.roomIds));
+    for(const room of p.rooms){
+      if(room.kind==='bedroom'){
+        bedrooms++;
+        if(!room.furniture.some(f=>f.type==='bed'))bare++;
+        const onto=p.connections.filter(e=>e.includes(room.id)).map(([a,b])=>byId.get(a===room.id?b:a)!).filter(isCirculation);
+        if(onto.length>1)shortcuts++;
+      }
+      if(isCirculation(room)||room.floorY<0||lit.has(room.id))continue;
+      windowless++;
+      // A room with no outside face cannot have a window; that is a massing question, not a window one.
+      const b=room.bounds,outside=(x:number,z:number)=>!p.rooms.some(o=>o.floorY<=room.floorY&&o.ceilingY>room.floorY&&insidePolygon(x,z,o.polygon));
+      const hasFace=[[b.x-.5,b.z+1.5],[b.x+b.w+.5,b.z+1.5],[b.x+1.5,b.z-.5],[b.x+1.5,b.z+b.d+.5]].some(([x,z])=>outside(x,z));
+      if(!hasFace)landlocked++;
+    }
+  }
+  assert.ok(bare/bedrooms<=0.03,`${bare} of ${bedrooms} bedchambers have no bed`);
+  assert.equal(shortcuts,0,`${shortcuts} bedchambers have a second door onto circulation`);
+  assert.ok((windowless-landlocked)/Math.max(1,windowless)<=0.5,`${windowless-landlocked} of ${windowless} windowless chambers do have an outside wall`);
+});

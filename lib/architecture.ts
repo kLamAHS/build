@@ -383,6 +383,12 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   const IMPROPER:Partial<Record<RoomKind,RoomKind[]>>={hall:['service','storage','bedroom'],sacred:['service','storage','bedroom','study'],bedroom:['service','bedroom','sacred','hall'],service:['hall','sacred','bedroom'],storage:['hall','sacred'],study:['sacred']};
   const improper=(e:typeof candidates[number])=>(IMPROPER[e.a.kind]??[]).includes(e.b.kind)||(IMPROPER[e.b.kind]??[]).includes(e.a.kind);
   const proper=(e:typeof candidates[number])=>open(e)&&!improper(e);
+  /** A second door onto circulation turns a private chamber into a shortcut somebody will take. */
+  const crowds=(e:typeof candidates[number])=>[e.a,e.b].some(r=>{
+    const other=r===e.a?e.b:e.a;
+    return ROOM_PRIVACY[r.kind]>=5&&isCirculation(other)&&toCirculation.get(r.id)!>0;
+  });
+  const discreet=(e:typeof candidates[number])=>proper(e)&&!crowds(e);
   // 1. The circulation skeleton: passages, stairs, galleries and the hall joined into one network.
   const spine=candidates.filter(e=>isCirculation(e.a)&&isCirculation(e.b)).sort(wide);
   for(const edge of spine)if(find(edge.a.id)!==find(edge.b.id))cut(edge);
@@ -398,14 +404,14 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   //    steward's office is a compromise; the same route through a bedchamber is not one worth making.
   const intrusion=(e:typeof candidates[number])=>(isCirculation(e.a)?0:ROOM_PRIVACY[e.a.kind])+(isCirculation(e.b)?0:ROOM_PRIVACY[e.b.kind]);
   const byIntrusion=(m:typeof candidates[number],n:typeof candidates[number])=>intrusion(m)-intrusion(n)||wide(m,n);
-  for(const only of [proper,open])for(const edge of candidates.filter(only).sort(byIntrusion)){
+  for(const only of [discreet,proper,open])for(const edge of candidates.filter(only).sort(byIntrusion)){
     if(find(edge.a.id)!==find(edge.b.id))cut(edge);
   }
   // 4. Doors a designer would add between rooms that already have their own entrance: a kitchen into its
   //    pantry, a solar into the withdrawing room. Both sides keep an independent way in, so neither becomes a route.
   const PAIRED:Record<string,string[]>={Kitchen:['Pantry & buttery','Scullery','Larder','Wet larder','Bread oven'],Solar:['Withdrawing room','Parlour'],Bedchamber:['Wardrobe','Wardrobe & study','Linen room'],'Gabled bedchamber':['Wardrobe & study'],Workshop:['Goods store','Tool store','Counting room'],Guardroom:['Armoury','Watch room'],'Tower chamber':['Wardrobe','Antechamber'],'Solar chamber':['Wardrobe','Antechamber']};
   const paired=(m:Room,n:Room)=>(PAIRED[m.name]??[]).includes(n.name)||(PAIRED[n.name]??[]).includes(m.name);
-  for(const edge of candidates.filter(e=>proper(e)&&paired(e.a,e.b)).sort(wide)){
+  for(const edge of candidates.filter(e=>discreet(e)&&paired(e.a,e.b)).sort(wide)){
     if(toCirculation.get(edge.a.id)!&&toCirculation.get(edge.b.id)!)cut(edge);
   }
   // 5. Loop closure. A plan whose doors form a bare tree forces one route to everywhere; a real house
@@ -443,7 +449,8 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       for(const [id,strands] of forced){
         const stranded=new Set(strands);
         const reaches=(e:typeof candidates[number])=>e.a.id!==id&&e.b.id!==id&&stranded.has(e.a.id)!==stranded.has(e.b.id);
-        const relief=candidates.filter(e=>proper(e)&&reaches(e)).sort(byIntrusion)[0]
+        const relief=candidates.filter(e=>discreet(e)&&reaches(e)).sort(byIntrusion)[0]
+          ??candidates.filter(e=>proper(e)&&reaches(e)).sort(byIntrusion)[0]
           ??candidates.filter(e=>open(e)&&reaches(e)).sort(byIntrusion)[0];
         if(relief){cut(relief);relieved=true;}
       }
@@ -466,9 +473,65 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   for(const r of p.rooms){
     const b=r.bounds;
     r.description=r.kind==='hall'?`The primary household hall rises ${r.ceilingY-r.floorY} blocks, with an open volume above and a screens passage at the service end.`:r.kind==='stairs'?'Reserved stair hall: two-block flights, three-block headroom and landings at each occupied level.':r.kind==='bedroom'?'A private chamber entered from a landing; household routes do not pass through it.':r.kind==='gallery'?'A partial timber gallery overlooking the hall. The central volume remains open to below.':`${r.name} in the ${components.find(c=>c.id===r.componentId)!.name.toLowerCase()}, connected to the household circulation.`;
-    const addFurniture=(type:Room['furniture'][number]['type'],x:number,z:number,w:number,d:number,h=1)=>{const b={x,z,w,d};const doorApproaches=p.openings.filter(o=>o.type!=='window'&&o.roomIds.includes(r.id)).map(o=>o.axis==='x'?{x:o.x-3,z:o.z-1,w:7,d:o.width+2}:{x:o.x-1,z:o.z-3,w:o.width+2,d:7});if(w>0&&d>0&&!doorApproaches.some(a=>intersects(a,b)))r.furniture.push({type,x,z,w,d,y:r.floorY+1,h,material:9});};
+    const generous=r.kind==='hall'||r.kind==='gallery'||r.kind==='sacred';
+    // The points a household actually has to reach inside this room, and whether a two-block route still
+    // joins them once a piece is in place. Moving furniture off a doorway is no good if it walls off a door.
+    const ports:Point[]=[];
+    for(const o of p.openings.filter(o=>o.type!=='window'&&o.roomIds.includes(r.id))){
+      const rb=r.bounds;
+      ports.push(o.axis==='x'?{x:o.x===rb.x?o.x+1:o.x-2,z:o.z}:{x:o.x,z:o.z===rb.z?o.z+1:o.z-2});
+    }
+    for(const st of p.stairs.filter(st=>st.roomIds.includes(r.id)))ports.push(st.landings[r.floorY===st.fromY?0:1]);
+    const routesSurvive=(extra:Rect)=>{
+      if(ports.length<2)return true;
+      const rb=r.bounds,blocked=[...r.furniture,extra];
+      const walkable=(px:number,pz:number)=>{
+        if(px<=rb.x||pz<=rb.z||px+1>=rb.x+rb.w||pz+1>=rb.z+rb.d)return false;
+        for(let dx=0;dx<2;dx++)for(let dz=0;dz<2;dz++){
+          if(!insidePolygon(px+dx+.5,pz+dz+.5,r.polygon))return false;
+          if(blocked.some(f=>px+dx>=f.x&&px+dx<f.x+f.w&&pz+dz>=f.z&&pz+dz<f.z+f.d))return false;
+        }
+        return true;
+      };
+      if(ports.some(pt=>!walkable(pt.x,pt.z)))return false;
+      const seen=new Set([`${ports[0].x},${ports[0].z}`]),queue=[ports[0]];
+      for(let i=0;i<queue.length;i++)for(const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]] as const){
+        const nx=queue[i].x+dx,nz=queue[i].z+dz,k=`${nx},${nz}`;
+        if(seen.has(k)||!walkable(nx,nz))continue;
+        seen.add(k);queue.push({x:nx,z:nz});
+      }
+      return ports.every(pt=>seen.has(`${pt.x},${pt.z}`));
+    };
+    const approaches=p.openings.filter(o=>o.type!=='window'&&o.roomIds.includes(r.id)).map(o=>{
+      if(generous)return o.axis==='x'?{x:o.x-3,z:o.z-1,w:7,d:o.width+2}:{x:o.x-1,z:o.z-3,w:o.width+2,d:7};
+      const rb=r.bounds;
+      if(o.axis==='x'){const inward=o.x===rb.x;return {x:inward?o.x:o.x-3,z:o.z-1,w:3,d:o.width+2};}
+      const inward=o.z===rb.z;return {x:o.x-1,z:inward?o.z:o.z-3,w:o.width+2,d:3};
+    });
+    const addFurniture=(type:Room['furniture'][number]['type'],x:number,z:number,w:number,d:number,h=1)=>{
+      if(w<=0||d<=0)return;
+      const b=r.bounds;
+      const fits=(at:Point)=>{
+        const box={...at,w,d};
+        if(at.x<=b.x||at.z<=b.z||at.x+w>=b.x+b.w||at.z+d>=b.z+b.d)return false;
+        if(!insidePolygon(at.x+.5,at.z+.5,r.polygon)||!insidePolygon(at.x+w-.5,at.z+d-.5,r.polygon))return false;
+        return !r.furniture.some(f=>intersects(f,box))&&!approaches.some(a=>intersects(a,box));
+      };
+      const tried:Point[]=[];
+      if(fits({x,z}))tried.push({x,z});
+      if(!generous)for(let px=b.x+1;px+w<b.x+b.w;px++)for(let pz=b.z+1;pz+d<b.z+b.d;pz++){
+        // Against a wall: a piece stranded mid-floor is what parts a room in two.
+        if(!(px===b.x+1||px+w===b.x+b.w-1||pz===b.z+1||pz+d===b.z+b.d-1))continue;
+        if(fits({x:px,z:pz}))tried.push({x:px,z:pz});
+      }
+      tried.sort((m,n)=>(Math.abs(m.x-x)+Math.abs(m.z-z))-(Math.abs(n.x-x)+Math.abs(n.z-z))||m.x-n.x||m.z-n.z);
+      for(const at of tried.slice(0,8)){
+        if(!routesSurvive({...at,w,d}))continue;
+        r.furniture.push({type,...at,w,d,y:r.floorY+1,h,material:9});break;
+      }
+    };
     if(r.kind==='hall'){const x=b.x+4,z=b.z+4;addFurniture('table',x,z,3,Math.max(4,b.d-9));addFurniture('bench',x-2,z,1,Math.max(4,b.d-9));addFurniture('bench',x+4,z,1,Math.max(4,b.d-9));if(b.w>22){addFurniture('table',b.x+b.w-8,z,3,Math.max(4,b.d-9));addFurniture('bench',b.x+b.w-10,z,1,Math.max(4,b.d-9));}addFurniture('table',b.x+7,b.z+2,Math.max(4,b.w-14),2);}
-    else if(r.kind==='bedroom'){addFurniture('bed',b.x+2,b.z+2,3,4);addFurniture('shelf',b.x+b.w-2,b.z+2,1,3,2);}
+    else if(r.kind==='bedroom'){addFurniture('bed',b.x+2,b.z+2,Math.min(3,b.w-3),Math.min(4,b.d-3));addFurniture('shelf',b.x+b.w-2,b.z+2,1,Math.min(3,b.d-3),2);}
     else if(r.kind==='service'){addFurniture('table',b.x+2,b.z+2,Math.min(4,b.w-4),2);if(b.d>9)addFurniture('hearth',b.x+2,b.z+b.d-3,3,1,2);}
     else if(r.kind==='study'){addFurniture('desk',b.x+2,b.z+2,3,2);addFurniture('shelf',b.x+2,b.z+b.d-2,Math.max(2,b.w-4),1,2);}
     else if(r.kind==='storage'){addFurniture('shelf',b.x+2,b.z+2,Math.max(2,b.w-4),1,2);if(b.d>8)addFurniture('shelf',b.x+2,b.z+b.d-2,Math.max(2,b.w-4),1,2);}
@@ -492,8 +555,15 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     if(p.courts[1])p.routes.push({id:'ward-route',name:'Inner to outer gate',points:[{x:p.entry.x-1,z:bottom-1},{x:p.entry.x-1,z:p.courts[1].gate.z+2}],width:2});
   }
   buildGeometry(p);
-  const minX=Math.min(...p.blocks.map(b=>b.x)),minZ=Math.min(...p.blocks.map(b=>b.z)),maxX=Math.max(...p.blocks.map(b=>b.x+b.w)),maxZ=Math.max(...p.blocks.map(b=>b.z+b.d));
-  p.bounds={x:minX-8,z:minZ-8,w:maxX-minX+16,d:maxZ-minZ+16};p.width=maxX-minX;p.depth=maxZ-minZ;p.maxY=Math.max(...p.blocks.map(b=>b.y+b.h))-1;p.minY=Math.min(...p.blocks.map(b=>b.y));p.totalArea=p.rooms.reduce((a,r)=>a+r.area,0);
+  // One pass, no spread: a large composition reaches six figures of blocks, and spreading that into an
+  // argument list makes whether the plan builds at all depend on the host's stack rather than on the seed.
+  let minX=Infinity,minZ=Infinity,maxX=-Infinity,maxZ=-Infinity,lowY=Infinity,highY=-Infinity;
+  for(const b of p.blocks){
+    if(b.x<minX)minX=b.x;if(b.z<minZ)minZ=b.z;
+    if(b.x+b.w>maxX)maxX=b.x+b.w;if(b.z+b.d>maxZ)maxZ=b.z+b.d;
+    if(b.y<lowY)lowY=b.y;if(b.y+b.h>highY)highY=b.y+b.h;
+  }
+  p.bounds={x:minX-8,z:minZ-8,w:maxX-minX+16,d:maxZ-minZ+16};p.width=maxX-minX;p.depth=maxZ-minZ;p.maxY=highY-1;p.minY=lowY;p.totalArea=p.rooms.reduce((a,r)=>a+r.area,0);
   p.signature=hash(JSON.stringify(components.map(c=>[c.kind,c.bounds.w,c.bounds.d,c.parentId,c.storeys,c.bounds.x,c.bounds.z]))).toString(16);
   p.navigation=navigationReport(p);
   p.validation=validatePlan(p);
@@ -568,14 +638,23 @@ function buildGeometry(p:Plan){
     }
   }
   // Exterior windows are accepted only when the other side is outside every occupied room.
+  // Cells a door or the entrance already occupies. A window cut into one of them blocks the doorway.
+  const doorCells=new Set<string>();
+  for(const o of p.openings){
+    if(o.type==='window')continue;
+    for(let w=-1;w<=o.width;w++)doorCells.add(`${o.x+(o.axis==='z'?w:0)},${o.z+(o.axis==='x'?w:0)}`);
+  }
   for(const r of p.rooms){
-    if(r.floorY<0||r.kind==='stairs'||r.kind==='circulation')continue;
+    if(r.floorY<0||r.kind==='stairs')continue;
     for(const axis of ['x','z'] as const)for(const high of [false,true]){
       const b=r.bounds,fixed=axis==='x'?b.x+(high?b.w:0):b.z+(high?b.d:0),start=axis==='x'?b.z:b.x,len=axis==='x'?b.d:b.w;
-      for(let at=start+3;at<start+len-3;at+=7){
+      // A wall too short for the seven-block rhythm still takes a single window on its centre line.
+      const stride=len>=10?7:Math.max(1,len-4),first=len>=10?start+3:start+Math.floor((len-2)/2);
+      for(let at=first;at<start+len-3;at+=stride){
         const x=axis==='x'?fixed:at,z=axis==='z'?fixed:at;
         const outX=axis==='x'?x+(high?1.5:-.5):x+.5,outZ=axis==='z'?z+(high?1.5:-.5):z+.5;
         if(p.rooms.some(other=>other.floorY<=r.floorY&&other.ceilingY>r.floorY&&insidePolygon(outX,outZ,other.polygon)))continue;
+        if(r.floorY===0&&[0,1].some(w=>doorCells.has(`${x+(axis==='z'?w:0)},${z+(axis==='x'?w:0)}`)))continue;
         p.openings.push({id:`w${p.openings.length}`,type:'window',axis,x,z,y:r.floorY+2,width:2,height:2,roomIds:[r.id]});
       }
     }

@@ -75,7 +75,8 @@ export function navigationReport(plan:Plan):Navigation {
   const graph=accessGraph(plan),transits=transitViolations(plan,graph),depths=[...graph.depth.values()];
   const maxDepth=depths.length?Math.max(...depths):0;
   const meanDepth=depths.length?depths.reduce((a,b)=>a+b,0)/depths.length:0;
-  const loops=plan.connections.length-plan.rooms.length+1;
+  const doorways=new Set(plan.connections.map(([a,b])=>a<b?`${a}|${b}`:`${b}|${a}`)).size;
+  const loops=doorways-plan.rooms.length+1;
   const stranded=new Set(transits.flatMap(t=>t.strands));
   // A forced crossing is the defect this generator exists to avoid, so it dominates the score.
   const crossings=Math.min(60,transits.length*12+stranded.size*2);
@@ -94,7 +95,8 @@ export function routeToRoom(plan:Plan,roomId:string,graph=accessGraph(plan)):Roo
     const room=byId.get(here);
     if(!room)break;
     route.push(room);
-    const step=graph.adjacency.get(here)!.find(n=>graph.depth.get(n)===graph.depth.get(here)!-1);
+    const back=graph.adjacency.get(here)!.filter(n=>graph.depth.get(n)===graph.depth.get(here)!-1);
+    const step=back.sort((m,n)=>(ROOM_PRIVACY[byId.get(m)?.kind??'circulation']-ROOM_PRIVACY[byId.get(n)?.kind??'circulation'])||m.localeCompare(n))[0];
     if(step===undefined)break;
     here=step;
   }
