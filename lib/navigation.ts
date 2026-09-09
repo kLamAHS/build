@@ -29,13 +29,14 @@ export function accessGraph(plan:Plan):AccessGraph {
 /**
  * Rooms whose closure strands another room — the honest reading of "you have to walk through it".
  * A chamber with two doors is not a defect while a second route exists, which is what loops are for.
+ * The entrance is left out: it is on every route into the building, so naming it says nothing.
  * Iterative Hopcroft–Tarjan: recursion would overflow on a five-hundred-room castle.
  */
 export function articulationPoints(graph:AccessGraph):Map<string,string[]> {
   const cuts=new Map<string,string[]>(),{adjacency,entry}=graph;
   if(entry===undefined||!adjacency.has(entry))return cuts;
   const discovery=new Map<string,number>(),low=new Map<string,number>(),parent=new Map<string,string|null>(),subtree=new Map<string,string[]>();
-  const stack=[{id:entry,index:0}];let timer=0,rootChildren=0;
+  const stack=[{id:entry,index:0}];let timer=0;
   discovery.set(entry,timer);low.set(entry,timer++);parent.set(entry,null);
   while(stack.length){
     const frame=stack[stack.length-1],neighbours=adjacency.get(frame.id)!;
@@ -43,7 +44,6 @@ export function articulationPoints(graph:AccessGraph):Map<string,string[]> {
       const next=neighbours[frame.index++];
       if(next===parent.get(frame.id))continue;
       if(discovery.has(next)){low.set(frame.id,Math.min(low.get(frame.id)!,discovery.get(next)!));continue;}
-      if(frame.id===entry)rootChildren++;
       parent.set(next,frame.id);discovery.set(next,timer);low.set(next,timer++);stack.push({id:next,index:0});
       continue;
     }
@@ -56,7 +56,6 @@ export function articulationPoints(graph:AccessGraph):Map<string,string[]> {
     subtree.set(up,[...(subtree.get(up)??[]),...branch]);
     if(up!==entry&&low.get(frame.id)!>=discovery.get(up)!)cuts.set(up,[...(cuts.get(up)??[]),...branch]);
   }
-  if(rootChildren>1)cuts.set(entry,adjacency.get(entry)!.slice());
   return cuts;
 }
 
