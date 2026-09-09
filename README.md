@@ -46,6 +46,26 @@ so these are real geometry rather than a drawing convention. Two rules bound the
 straight four-block run of wall to receive its door, and its floor never pinches below the two walkable
 blocks a household needs.
 
+## The household, and the site it stands on
+
+The generator organises a household before it divides rooms.
+
+A **suite** is a set of rooms occupied together: a chamber with the closet cut from its angle. The closet is
+entered through its chamber and never takes a door onto a passage, so a wardrobe belongs to the room it
+serves rather than opening off the corridor. A chamber carrying only its own suite is not counted as a
+forced crossing; carrying anything else still is.
+
+The **hall** is longer on its dais-to-screens axis than it is wide. A dais carries the high table across the
+head of the room, the open hearth sits on the centre line, and the household tables run down the length
+toward the screens passage, which is where the service doors are. A **kitchen, bakehouse or brewhouse** gets
+a great fire, an oven and a dressing table. Fires, ovens, wells, daises and altars are drawn as
+installations, so a room can be told from its fittings with the labels off.
+
+A **defended enclosure** is a building rather than a border: a curtain three blocks thick, a gatehouse
+astride it with a vaulted passage through the middle and a guard chamber to each side, and turrets carried
+above. Its yard does the household's outdoor work — a stable range, a service yard, and the well the
+kitchen draws from.
+
 ## Model and scope
 
 Plans are deterministic from the complete settings and seed. A plan unit represents one chosen block, metre, or foot; changing the unit label is a scale interpretation, not a conversion. Room measures are approximate. These are conceptual creative build plans, with furnished floor diagrams and a floor overview. They do not export Minecraft schematics, construction documents, terrain-aware placement, or a solid 3D model.

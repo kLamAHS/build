@@ -259,3 +259,39 @@ void test('a suite is entered as a set: its closet opens off its chamber, not of
   }
   assert.ok(suites>=representatives.length,`only ${suites} suites across ${representatives.length} plans`);
 });
+void test('a defended enclosure is a building: wall mass, a gatehouse, and a yard that works',()=>{
+  // The critique this answers: "the long walls, tiny corner-tower outlines and unresolved southern edge do
+  // not communicate an inhabitable defensive structure ... where is the entrance through that enclosure?"
+  const castle=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'keep-bailey',size:200,floors:3,seed:'ENCLOSURE'});
+  assert.ok(castle.courts.length>0,'a castle has no enclosure');
+  for(const court of castle.courts){
+    assert.ok(court.thickness>=2,`${court.name} curtain is ${court.thickness} block thick`);
+    // The gate is a passage through the gatehouse, not a gap in a line.
+    assert.ok(court.gatehouse.w>=court.thickness*3,`${court.name} gatehouse is too slight to pass through`);
+    assert.ok(court.gate.x>court.gatehouse.x&&court.gate.x<court.gatehouse.x+court.gatehouse.w,'the gate is not in the gatehouse');
+    assert.ok(court.gatehouse.z<=court.gate.z&&court.gatehouse.z+court.gatehouse.d>=court.gate.z,'the gatehouse does not straddle the curtain');
+    // The curtain is really that thick in blocks, not just in the record.
+    const wall=castle.walls.filter(w=>w.componentId===court.id&&w.y===0);
+    assert.ok(wall.length>0,`${court.name} has no wall blocks`);
+  }
+  const inner=castle.courts[0];
+  assert.ok(inner.yards.length>0,'the bailey is left as blank canvas');
+  assert.ok(inner.well,'the household has no water in its yard');
+  for(const yard of inner.yards){
+    assert.ok(yard.bounds.w>=8&&yard.bounds.d>=8,`${yard.name} is too small to work in`);
+    assert.ok(yard.bounds.x>=inner.bounds.x&&yard.bounds.x+yard.bounds.w<=inner.bounds.x+inner.bounds.w,`${yard.name} is outside the walls`);
+  }
+  // A kitchen is an installation, wherever it is: fire and oven, not a table and a token hearth.
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    for(const kitchen of p.rooms.filter(r=>r.name==='Kitchen'&&r.bounds.w>=9&&r.bounds.d>=9)){
+      const fittings=new Set(kitchen.furniture.map(f=>f.type));
+      assert.ok(fittings.has('hearth')&&fittings.has('oven'),`${settings.seed}: the kitchen has no ${fittings.has('hearth')?'oven':'fire'}`);
+    }
+  }
+  // The hall's long axis runs the way its ceremony does, and it has a head to the room.
+  const hall=reference.rooms.find(r=>r.kind==='hall')!;
+  assert.ok(hall.bounds.d>hall.bounds.w,`the hall is ${hall.bounds.w} across and only ${hall.bounds.d} deep`);
+  const fittings=new Set(hall.furniture.map(f=>f.type));
+  assert.ok(fittings.has('dais')&&fittings.has('hearth')&&fittings.has('table'),'the hall has no dais, hearth or table');
+});

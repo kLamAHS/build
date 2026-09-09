@@ -31,7 +31,15 @@ export function PlanDrawing({plan,floor,options,selected,onSelect,prefix='plan',
     <defs><pattern id={`${prefix}-grid`} width="1" height="1" patternUnits="userSpaceOnUse"><path d="M1 0H0V1" fill="none" stroke="#a89e86" strokeWidth=".055" opacity=".4"/></pattern><pattern id={`${prefix}-void`} width="2" height="2" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M0 0V2" stroke="#aea185" strokeWidth=".1"/></pattern><pattern id={`${prefix}-wood`} width="3" height="2" patternUnits="userSpaceOnUse"><path d="M0 0H3M1.5 0V2" stroke="#9b8b6c" strokeWidth=".06" opacity=".45"/></pattern></defs>
     {floor.roofComponents.map(id=>{const c=plan.components.find(c=>c.id===id)!;return <g key={id} opacity=".28"><path d={polygonPath(c.polygon)} fill="#929b98" stroke="#636d66" strokeWidth=".3"/><text x={c.bounds.x+c.bounds.w/2} y={c.bounds.z+c.bounds.d/2} textAnchor="middle" fontFamily="Georgia" fontSize="1.3" fill="#364f43">Roof below</text></g>;})}
     {y===0&&plan.blocks.filter(block=>block.kind==='ground').map((r,i)=><rect key={i} x={r.x} y={r.z} width={r.w} height={r.d} fill={r.material===7?'#c0c9a4':'#d8c9aa'} stroke="#95a17b" strokeWidth=".12"/>)}
-    {y===0&&plan.courts.map(c=><text key={c.id} x={c.bounds.x+c.bounds.w*.65} y={c.bounds.z+c.bounds.d-8} fontSize="2" fontFamily="Georgia" fontStyle="italic" fill="#8b957a" textAnchor="middle">{c.name}</text>)}
+    {y===0&&plan.courts.map(c=><g key={c.id}>
+      {c.yards.map(yard=><g key={yard.name}>
+        <rect x={yard.bounds.x} y={yard.bounds.z} width={yard.bounds.w} height={yard.bounds.d} fill={yard.kind==='garden'?'#c6cfa6':'#ded2b6'} stroke="#a89b7c" strokeWidth=".2" strokeDasharray="1.4 1"/>
+        <text x={yard.bounds.x+yard.bounds.w/2} y={yard.bounds.z+yard.bounds.d/2} textAnchor="middle" fontFamily="Georgia" fontSize="2.1" fill="#7d7357">{yard.name}</text>
+      </g>)}
+      {c.well&&<g><circle cx={c.well.x} cy={c.well.z} r="2.1" fill="#9fb3b8" stroke="#5f7782" strokeWidth=".3"/><circle cx={c.well.x} cy={c.well.z} r="1" fill="#4d6068"/><text x={c.well.x} y={c.well.z+4.4} textAnchor="middle" fontFamily="Georgia" fontSize="1.9" fill="#5d7076">Well</text></g>}
+      <text x={c.gatehouse.x+c.gatehouse.w/2} y={c.gatehouse.z-1.6} textAnchor="middle" fontFamily="Georgia" fontSize="2.2" fill="#6f7560">Gatehouse</text>
+      <text x={c.bounds.x+c.bounds.w*.72} y={c.bounds.z+c.bounds.d*.42} fontSize="2.6" fontFamily="Georgia" fontStyle="italic" fill="#8b957a" textAnchor="middle">{c.name}</text>
+    </g>)}
     {floor.voids.map(v=><g key={v.id}><path d={polygonPath(v.polygon)+v.holes.map(h=>rectPath(h.x,h.z,h.w,h.d)).join('')} fill={`url(#${prefix}-void)`} fillRule="evenodd" stroke="#aa9c81" strokeWidth=".2" strokeDasharray="1 1"/><text x={v.bounds.x+v.bounds.w/2} y={v.bounds.z+v.bounds.d/2} textAnchor="middle" fontFamily="Georgia" fontSize="1.5" fontStyle="italic" fill="#9a8460">Open to hall below<tspan x={v.bounds.x+v.bounds.w/2} dy="2">{v.ceilingY} block ceiling</tspan></text></g>)}
     {floor.rooms.map(r=><g key={r.id}><path d={polygonPath(r.polygon)} fill={options.colors?ROOM_COLORS[r.kind]:'#eee4cd'}/><path d={polygonPath(r.polygon)} fill={`url(#${prefix}-wood)`}/>{r.holes.map((h,i)=><rect key={i} x={h.x} y={h.z} width={h.w+1} height={h.d+1} fill="#b0b4a4"/>)}{options.furniture&&<Furniture room={r}/>}</g>)}
     <path d={walls} fill="#707566"/>

@@ -1,4 +1,4 @@
-import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Suite, type GenerationResult, type BlockBox } from './model.ts';
+import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Suite, type Court, type GenerationResult, type BlockBox } from './model.ts';
 import { isCirculation, navigationReport, articulationPoints, ROOM_PRIVACY } from './navigation.ts';
 import { auditArchitecture } from './architectural-audit.ts';
 
@@ -727,10 +727,24 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   }
   if(!small&&(s.kind==='castle'||s.courtyard||['courtyard-manor','palace','double-ward'].includes(family))){
     const x=Math.min(...components.map(c=>c.bounds.x))-10,z=Math.min(...components.map(c=>c.bounds.z))-10,right=Math.max(...components.map(c=>c.bounds.x+c.bounds.w))+10,bottom=Math.max(...components.map(c=>c.bounds.z+c.bounds.d))+(family==='keep-bailey'?30:14);
-    const court={id:'inner-court',name:s.kind==='castle'?'Inner bailey':'Walled court',bounds:{x,z,w:right-x,d:bottom-z},gate:{x:p.entry.x,z:bottom},wallHeight:s.kind==='castle'?6:3};p.courts.push(court);
+    const thickness=s.kind==='castle'?3:2;
+    const gate={x:p.entry.x,z:bottom};
+    // A gatehouse straddles the curtain, with a passage through its middle and a guard chamber either side.
+    const gatehouse:Rect={x:gate.x-7,z:bottom-4,w:15,d:thickness+8};
+    const court:Court={id:'inner-court',name:s.kind==='castle'?'Inner bailey':'Walled court',bounds:{x,z,w:right-x,d:bottom-z},gate,wallHeight:s.kind==='castle'?6:3,thickness,gatehouse,yards:[]};
+    // The yard does the household's outdoor work: the horses, the deliveries, and the water it draws.
+    const southOf=Math.max(...components.map(c=>c.bounds.z+c.bounds.d)),westOf=Math.min(...components.map(c=>c.bounds.x));
+    const yardTop=southOf+4,yardRoom=bottom-6-yardTop;
+    if(yardRoom>=14){
+      court.yards.push({name:'Stable range',kind:'stable',bounds:{x:x+4,z:yardTop,w:Math.min(26,Math.max(12,Math.floor((right-x)/4))),d:12}});
+      court.yards.push({name:'Service yard',kind:'service',bounds:{x:right-4-Math.min(30,Math.max(14,Math.floor((right-x)/3))),z:yardTop,w:Math.min(30,Math.max(14,Math.floor((right-x)/3))),d:Math.min(20,yardRoom)}});
+      court.well={x:Math.round((westOf+p.entry.x)/2),z:yardTop+5};
+    }
+    p.courts.push(court);
     if(family==='double-ward'){
       const width=Math.max(54,Math.min(120,court.bounds.w-14));
-      p.courts.push({id:'outer-court',name:'Outer ward',bounds:{x:Math.max(x+4,Math.min(right-width-4,p.entry.x-Math.floor(width/2))),z:bottom,w:width,d:38+ri(0,12)},gate:{x:p.entry.x,z:bottom+38},wallHeight:6});
+      const outerBottom=bottom+38+ri(0,12),outerX=Math.max(x+4,Math.min(right-width-4,p.entry.x-Math.floor(width/2)));
+      p.courts.push({id:'outer-court',name:'Outer ward',bounds:{x:outerX,z:bottom,w:width,d:outerBottom-bottom},gate:{x:p.entry.x,z:outerBottom},wallHeight:6,thickness,gatehouse:{x:p.entry.x-7,z:outerBottom-4,w:15,d:thickness+8},yards:[{name:'Muster yard',kind:'muster',bounds:{x:outerX+5,z:bottom+6,w:Math.max(12,width-10),d:Math.max(10,outerBottom-bottom-14)}}]});
       p.courts[1].gate.z=p.courts[1].bounds.z+p.courts[1].bounds.d;
     }
     const outward=entranceOpening.outward!,entryStart={x:entranceOpening.x+(outward.x>0?1:outward.x<0?-2:0),z:entranceOpening.z+(outward.z>0?1:outward.z<0?-2:0)};
@@ -869,7 +883,7 @@ function buildGeometry(p:Plan){
   }
   for(const court of p.courts){
     const b=court.bounds,h=court.wallHeight;
-    outline(rectPolygon(b),0,h+1,1,'wall',court.id);
+    for(let t=0;t<court.thickness;t++)outline(rectPolygon({x:b.x+t,z:b.z+t,w:b.w-2*t,d:b.d-2*t}),0,h+1,1,'wall',court.id);
     if(h===6){
       // A two-block wall walk rests on masonry corbels inside the curtain.
       outline(rectPolygon({x:b.x+1,z:b.z+1,w:b.w-2,d:b.d-2}),h,1,1,'floor',court.id);
@@ -888,10 +902,24 @@ function buildGeometry(p:Plan){
       for(let j=0;j<6;j++)box({x:b.x+3+j,z:b.z+3,w:1,d:2},0,j+1,1,'stair',court.id);
       box({x:b.x+9,z:b.z+1,w:2,d:4},6,1,1,'floor',court.id);
     }
-    box({x:court.gate.x-1,z:court.gate.z,w:3,d:1},0,4,0,'air',court.id);
-    box({x:court.gate.x-2,z:court.gate.z-2,w:5,d:5},-1,1,6,'ground',court.id);
-    for(const dx of [-4,3])box({x:court.gate.x+dx,z:court.gate.z-2,w:2,d:4},0,h+3,1,'wall',court.id);
-    box({x:court.gate.x-3,z:court.gate.z-2,w:6,d:4},h+3,1,3,'roof',court.id);
+    const g=court.gatehouse,passage={x:court.gate.x-2,z:g.z,w:5,d:g.d};
+    outline(rectPolygon(g),0,h+3,1,'wall',court.id);
+    polygonFill(rectPolygon(g),-1,1,6,'ground',court.id);
+    for(const dx of [-2,3])outline(rectPolygon({x:court.gate.x+dx,z:g.z,w:1,d:g.d}),0,h+3,1,'wall',court.id);
+    box(passage,0,5,0,'air',court.id);
+    box({x:passage.x,z:passage.z-4,w:passage.w,d:passage.d+8},-1,1,6,'ground',court.id);
+    for(const side of [g.x,g.x+g.w-5]){
+      box({x:side+1,z:g.z+1,w:4,d:g.d-2},1,4,0,'air',court.id);
+      box({x:side+1,z:g.z+1,w:4,d:g.d-2},0,1,1,'floor',court.id);
+    }
+    box({x:g.x,z:g.z,w:g.w,d:g.d},h+3,1,3,'roof',court.id);
+    for(const cx of [g.x,g.x+g.w-2])box({x:cx,z:g.z-1,w:2,d:2},0,h+5,1,'wall',court.id);
+    for(const yard of court.yards)box(yard.bounds,-1,1,yard.kind==='garden'?7:6,'ground',court.id);
+    if(court.well){
+      const w=court.well;
+      outline(rectPolygon({x:w.x-2,z:w.z-2,w:4,d:4}),0,2,1,'wall',court.id);
+      box({x:w.x-1,z:w.z-1,w:2,d:2},-2,2,0,'air',court.id);
+    }
   }
   // Cut the shared gate after both ward walls have been placed.
   for(const court of p.courts)box({x:court.gate.x-1,z:court.gate.z,w:3,d:1},0,4,0,'air',court.id);

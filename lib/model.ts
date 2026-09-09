@@ -17,7 +17,8 @@ export type Floor={index:number;name:string;elevation:number;rooms:Room[];voids:
 export type BlockKind='wall'|'floor'|'roof'|'stair'|'support'|'furniture'|'ground'|'glass'|'chimney'|'air';
 export type BlockBox={x:number;y:number;z:number;w:number;h:number;d:number;material:number;kind:BlockKind;componentId:string;ownerFloor?:number};
 export type Chimney={bounds:Rect;fromY:number;toY:number;componentId:string};
-export type Court={id:string;name:string;bounds:Rect;gate:Point;wallHeight:number};
+export type Yard={name:string;bounds:Rect;kind:'stable'|'service'|'garden'|'muster'};
+export type Court={id:string;name:string;bounds:Rect;gate:Point;wallHeight:number;thickness:number;gatehouse:Rect;well?:Point;yards:Yard[]};
 export type Route={id:string;name:string;points:Point[];width:number};
 export type Transit={roomId:string;name:string;kind:RoomKind;floorY:number;strands:string[]};
 /** How the finished plan actually walks: forced crossings, route length and alternative routes. */
