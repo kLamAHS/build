@@ -6,7 +6,9 @@ export type Rect=Point & {w:number;d:number};
 export type RoomKind='hall'|'bedroom'|'service'|'sacred'|'storage'|'study'|'circulation'|'stairs'|'gallery';
 export type ComponentKind='hall'|'domestic'|'service'|'tower'|'chapel'|'gatehouse'|'workshop'|'lodging';
 export type Furniture=Rect & {y:number;h:number;type:'table'|'bench'|'bed'|'shelf'|'hearth'|'desk'|'altar';material:number};
-export type Room={id:string;name:string;kind:RoomKind;componentId:string;bounds:Rect;polygon:Point[];holes:Rect[];floorY:number;ceilingY:number;area:number;description:string;furniture:Furniture[]};
+export type Room={id:string;name:string;kind:RoomKind;componentId:string;suiteId?:string;bounds:Rect;polygon:Point[];holes:Rect[];floorY:number;ceilingY:number;area:number;description:string;furniture:Furniture[]};
+/** Rooms that belong to one occupant and are entered as a set: a chamber with its own wardrobe or garderobe. */
+export type Suite={id:string;name:string;kind:'lodging'|'lord'|'service'|'gate';roomIds:string[];headId:string};
 export type BuildingComponent={id:string;name:string;kind:ComponentKind;bounds:Rect;polygon:Point[];baseY:number;storeys:number;topY:number;roof:'gable-x'|'gable-z'|'pyramid'|'battlement';parentId?:string;phase:number};
 export type Opening={id:string;type:'door'|'window'|'entrance';axis:'x'|'z';x:number;y:number;z:number;width:number;height:number;roomIds:string[];outward?:Point};
 export type Stair={id:string;componentId:string;roomIds:string[];bounds:Rect;fromY:number;toY:number;width:number;headroom:number;landings:Rect[]};
@@ -20,7 +22,7 @@ export type Route={id:string;name:string;points:Point[];width:number};
 export type Transit={roomId:string;name:string;kind:RoomKind;floorY:number;strands:string[]};
 /** How the finished plan actually walks: forced crossings, route length and alternative routes. */
 export type Navigation={maxDepth:number;meanDepth:number;loops:number;unreachable:string[];transits:Transit[];strandedRooms:number;score:number};
-export type Plan={schemaVersion:2;generatorVersion:'2.0';name:string;settings:Settings;family:Family;components:BuildingComponent[];rooms:Room[];floors:Floor[];openings:Opening[];stairs:Stair[];chimneys:Chimney[];courts:Court[];routes:Route[];blocks:BlockBox[];walls:BlockBox[];slabs:BlockBox[];roofs:BlockBox[];supports:BlockBox[];bounds:Rect;minY:number;maxY:number;width:number;depth:number;totalArea:number;entry:Point;connections:[string,string][];validation:{valid:boolean;issues:string[]};navigation:Navigation;signature:string};
+export type Plan={schemaVersion:2;generatorVersion:'2.0';name:string;settings:Settings;family:Family;components:BuildingComponent[];rooms:Room[];floors:Floor[];openings:Opening[];stairs:Stair[];chimneys:Chimney[];courts:Court[];routes:Route[];blocks:BlockBox[];walls:BlockBox[];slabs:BlockBox[];roofs:BlockBox[];supports:BlockBox[];bounds:Rect;minY:number;maxY:number;width:number;depth:number;totalArea:number;entry:Point;connections:[string,string][];suites:Suite[];validation:{valid:boolean;issues:string[]};navigation:Navigation;signature:string};
 export type BuildingPlanV2=Plan;
 export type GenerationResult={ok:true;plan:Plan}|{ok:false;error:string};
 export const FAMILIES:Record<BuildKind,{id:Family;name:string;description:string}[]>={

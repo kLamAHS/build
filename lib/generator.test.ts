@@ -19,7 +19,21 @@ function audit(p:Plan){
     }
     if(door.type==='door'){
       const rooms=door.roomIds.map(id=>p.rooms.find(r=>r.id===id)!);
-      for(const r of rooms){const b=r.bounds;assert.ok(door.axis==='x'?(door.x===b.x||door.x===b.x+b.w):(door.z===b.z||door.z===b.z+b.d),`${door.id} is not on a shared wall`);}
+      for(const r of rooms){
+        const outline=new Set<string>();
+        for(let i=0;i<r.polygon.length;i++){
+          const v=r.polygon[i],w=r.polygon[(i+1)%r.polygon.length];
+          const steps=Math.max(Math.abs(w.x-v.x),Math.abs(w.z-v.z));
+          for(let k=0;k<=steps;k++){
+            const t=steps?k/steps:0;
+            outline.add(`${Math.round(v.x+(w.x-v.x)*t)},${Math.round(v.z+(w.z-v.z)*t)}`);
+          }
+        }
+        for(let k=0;k<door.width;k++){
+          const cell=door.axis==='x'?`${door.x},${door.z+k}`:`${door.x+k},${door.z}`;
+          assert.ok(outline.has(cell),`${door.id} is not on a wall of ${r.name}`);
+        }
+      }
     }
   }
   for(const st of p.stairs){
@@ -45,8 +59,11 @@ function audit(p:Plan){
   assert.equal(graph.unreachable.length,0,`${p.settings.seed}: ${graph.unreachable.length} rooms have no route from the entrance`);
   const forced=transitViolations(p,graph);
   assert.deepEqual(forced.map(t=>`${t.name} strands ${t.strands.length}`),[],`${p.settings.seed}: a household is forced to cross these rooms`);
+  const inSuite=new Map(p.suites.flatMap(u=>u.roomIds.filter(id=>id!==u.headId).map(id=>[id,u] as const)));
   for(const r of p.rooms.filter(r=>!isCirculation(r))){
     const doors=p.connections.filter(e=>e.includes(r.id)).map(([a,b])=>p.rooms.find(x=>x.id===(a===r.id?b:a))!);
+    const suite=inSuite.get(r.id);
+    if(suite){assert.ok(doors.some(d=>d.id===suite.headId),`${p.settings.seed}: ${r.name} is not entered from ${suite.name}`);continue;}
     assert.ok(doors.some(isCirculation),`${p.settings.seed}: ${r.name} has no door onto circulation`);
   }
   assert.ok(p.navigation.loops>=1,`${p.settings.seed}: the doors form a bare tree with only one route to everywhere`);
@@ -216,4 +233,29 @@ void test('rooms have shape and scale, not a grid of equal boxes',()=>{
   assert.ok(hall.polygon.length>4,'the great hall has no dais end');
   const chapel=reference.rooms.find(r=>r.kind==='sacred')!;
   assert.ok(chapel.polygon.length>8,'the chapel has no apse');
+});
+void test('a suite is entered as a set: its closet opens off its chamber, not off the corridor',()=>{
+  // The critique this answers: "several guest wardrobes appear to open from shared passages rather than
+  // directly from their associated guest chambers ... a poor default for storage belonging to a suite."
+  let suites=0;
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    const byId=new Map(p.rooms.map(r=>[r.id,r]));
+    for(const suite of p.suites){
+      suites++;
+      const head=byId.get(suite.headId)!;
+      assert.ok(head,`${settings.seed}: suite ${suite.id} has no chamber`);
+      for(const id of suite.roomIds){
+        if(id===suite.headId)continue;
+        const member=byId.get(id)!;
+        const doors=p.connections.filter(e=>e.includes(id)).map(([a,b])=>byId.get(a===id?b:a)!);
+        assert.ok(doors.some(d=>d.id===head.id),`${settings.seed}: ${member.name} is not entered from ${head.name}`);
+        assert.ok(!doors.some(isCirculation),`${settings.seed}: ${member.name} opens off ${doors.filter(isCirculation).map(d=>d.name).join(', ')}`);
+        assert.equal(member.suiteId,suite.id);
+      }
+    }
+    // Carrying your own closet is not being a corridor, and nothing else may be carried through a chamber.
+    for(const t of navigationReport(p).transits)assert.fail(`${settings.seed}: ${t.name} carries ${t.strands.length} rooms`);
+  }
+  assert.ok(suites>=representatives.length,`only ${suites} suites across ${representatives.length} plans`);
 });

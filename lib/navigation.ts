@@ -62,9 +62,13 @@ export function articulationPoints(graph:AccessGraph):Map<string,string[]> {
 /** Rooms that are not circulation and yet carry other rooms' only route. These are the layout's defects. */
 export function transitViolations(plan:Plan,graph=accessGraph(plan)):Transit[] {
   const byId=new Map(plan.rooms.map(r=>[r.id,r])),violations:Transit[]=[];
+  const suiteOf=new Map<string,Plan['suites'][number]>();
+  for(const suite of plan.suites)for(const id of suite.roomIds)suiteOf.set(id,suite);
   for(const [id,strands] of articulationPoints(graph)){
     const room=byId.get(id);
     if(!room||isCirculation(room))continue;
+    const suite=suiteOf.get(id);
+    if(suite&&suite.headId===id&&strands.every(s=>suite.roomIds.includes(s)))continue;
     violations.push({roomId:id,name:room.name,kind:room.kind,floorY:room.floorY,strands});
   }
   return violations.sort((a,b)=>b.strands.length-a.strands.length||a.roomId.localeCompare(b.roomId));

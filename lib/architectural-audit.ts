@@ -12,7 +12,10 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
   }
   for(const r of plan.rooms){
     const ports:Point[]=[];
-    for(const o of plan.openings.filter(o=>o.type!=='window'&&o.roomIds.includes(r.id))){const b=r.bounds;ports.push(o.axis==='x'?{x:o.x===b.x?o.x+1:o.x-2,z:o.z}:{x:o.x,z:o.z===b.z?o.z+1:o.z-2});}
+    for(const o of plan.openings.filter(o=>o.type!=='window'&&o.roomIds.includes(r.id))){
+      const near=o.axis==='x'?{x:o.x+1,z:o.z}:{x:o.x,z:o.z+1},far=o.axis==='x'?{x:o.x-2,z:o.z}:{x:o.x,z:o.z-2};
+      ports.push(insidePolygon(near.x+1,near.z+1,r.polygon)?near:far);
+    }
     for(const st of plan.stairs.filter(st=>st.roomIds.includes(r.id))){const l=st.landings[r.floorY===st.fromY?0:1];ports.push({x:l.x,z:l.z});}
     const reachable=roomRoutes(r,ports,grid);
     if(!reachable)issues.push(`${r.name} (${r.componentId}, Y ${r.floorY}) does not have a clear two-block route between its doors and landings.`);

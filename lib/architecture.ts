@@ -1,4 +1,4 @@
-import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type GenerationResult, type BlockBox } from './model.ts';
+import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Suite, type GenerationResult, type BlockBox } from './model.ts';
 import { isCirculation, navigationReport, articulationPoints, ROOM_PRIVACY } from './navigation.ts';
 import { auditArchitecture } from './architectural-audit.ts';
 
@@ -164,7 +164,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   if(family==='keep-bailey'&&!small&&domestic)attach(domestic,'workshop','Garrison range','n',26,34,Math.min(2,s.floors),0);
   if(family==='double-ward'&&!small){const end=[...components].sort((a,b)=>b.bounds.x+b.bounds.w-a.bounds.x-a.bounds.w)[0];attach(end,'gatehouse','Outer ward gate','e',16,14,1,0);}
   // Compact budgets keep the same minimum stair and room sizes; optional ranges are omitted.
-  const p:Plan={schemaVersion:2,generatorVersion:'2.0',name:reference?'Alderhall Manor':`${pick(names)}${pick(['wick','mere','ford','haven'])} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,family,components,rooms:[],floors:[],openings:[],stairs:[],chimneys:[],courts:[],routes:[],blocks:[],walls:[],slabs:[],roofs:[],supports:[],bounds:{x:0,z:0,w:0,d:0},minY:s.cellar?-6:0,maxY:0,width:0,depth:0,totalArea:0,entry:{x:0,z:0},connections:[],validation:{valid:true,issues:[]},navigation:{maxDepth:0,meanDepth:0,loops:0,unreachable:[],transits:[],strandedRooms:0,score:0},signature:''};
+  const p:Plan={schemaVersion:2,generatorVersion:'2.0',name:reference?'Alderhall Manor':`${pick(names)}${pick(['wick','mere','ford','haven'])} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,family,components,rooms:[],floors:[],openings:[],stairs:[],chimneys:[],courts:[],routes:[],blocks:[],walls:[],slabs:[],roofs:[],supports:[],bounds:{x:0,z:0,w:0,d:0},minY:s.cellar?-6:0,maxY:0,width:0,depth:0,totalArea:0,entry:{x:0,z:0},connections:[],suites:[],validation:{valid:true,issues:[]},navigation:{maxDepth:0,meanDepth:0,loops:0,unreachable:[],transits:[],strandedRooms:0,score:0},signature:''};
   function room(c:BuildingComponent,name:string,kind:RoomKind,bounds:Rect,y:number,ceiling=y+6,shape:RoomShape='rect',shapeSide:'n'|'s'|'e'|'w'='e',notch?:Rect){
     const envelope=c.kind==='tower'?c.polygon:rectPolygon(componentFootprint(c,y,family));
     const polygon=shape==='rect'?clipPolygon(envelope,bounds):clipPolygon(shapePolygon(bounds,shape,shapeSide,notch),componentFootprint(c,y,family));
@@ -284,6 +284,16 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   }
   // A household has one lord's lodging and one great kitchen. Later ranges of the same kind are the
   // second-rank buildings a real estate accumulates: guest lodgings, a brewhouse, a smithy.
+  /** Bind a closet to the chamber it is cut from, so it is entered through it and not off the passage. */
+  const suiteLinks:{head:Room;member:Room}[]=[];
+  function suiteOf(head:Room,member:Room){
+    const suite=p.suites.find(x=>x.headId===head.id)??(()=>{
+      const made={id:`u${p.suites.length}`,name:head.name,kind:(head.kind==='bedroom'?'lodging':head.kind==='service'||head.kind==='storage'?'service':'lord') as Suite['kind'],roomIds:[head.id],headId:head.id};
+      p.suites.push(made);head.suiteId=made.id;return made;
+    })();
+    suite.roomIds.push(member.id);member.suiteId=suite.id;
+    suiteLinks.push({head,member});
+  }
   const rankInKind=new Map<string,number>();
   {
     const seen=new Map<ComponentKind,number>();
@@ -401,23 +411,26 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
         for(const rect of divide(area.rect,Array.from({length:count},(_,k)=>k===0?2:1)))slots.push({rect,passage:area.passage,principal:false});
       });
       const head=slots[0];
-      // A closet in the angle of the principal room, with its own door onto the passage the room fronts.
       const closetDepth=5,closetWidth=head?Math.min(7,Math.floor(head.rect.w/3)):0;
       const roomy=head&&head.rect.w>=closetWidth+MIN_ROOM*2&&head.rect.d>=closetDepth+MIN_ROOM+2&&c.kind!=='tower';
       const notch:Rect|undefined=roomy?{
         x:f%2===0?head.rect.x:head.rect.x+head.rect.w-closetWidth,
-        z:head.passage==='s'?head.rect.z+head.rect.d-closetDepth:head.rect.z,
+        z:head.passage==='s'?head.rect.z:head.rect.z+head.rect.d-closetDepth,
         w:closetWidth,d:closetDepth,
       }:undefined;
+      let chamber:Room|undefined;
       slots.forEach((slot,i)=>{
         const [name,kind]=program[Math.min(i,program.length-1)];
-        const crown=c.kind==='tower'&&f>0&&slot.principal&&slot.rect.w>=11&&slot.rect.d>=11;
-        const shape:RoomShape=crown?'octagon':slot.principal&&notch?'ell':slot.principal&&slot.rect.w>=14&&slot.rect.d>=14?'canted':'rect';
-        room(c,name,kind,slot.rect,y,gabled?y+4:y+6,shape,'e',notch);
+        const shape:RoomShape=c.kind==='tower'?'rect'
+          :slot.principal&&notch?'ell'
+          :slot.principal&&slot.rect.w>=14&&slot.rect.d>=14?'canted':'rect';
+        const made=room(c,name,kind,slot.rect,y,gabled?y+4:y+6,shape,'e',notch);
+        if(slot.principal)chamber=made;
       });
-      if(notch){
+      if(notch&&chamber){
         const [name,kind]=program[program.length-1];
-        room(c,name,kind,notch,y,gabled?y+4:y+6);
+        const closet=room(c,name,kind,notch,y,gabled?y+4:y+6);
+        suiteOf(chamber,closet);
       }
       if(hasStairs){const r=room(c,'Stair hall','stairs',stairRect,y);stairRooms.push(r);}
       else room(c,c.kind==='service'?'Bread oven':'Household store',c.kind==='service'?'service':'storage',stairRect,y);
@@ -455,6 +468,30 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     if(pos===undefined)continue;
     candidates.push({a,b,axis,fixed,pos,span:hi-lo,priority:0});
   }
+  for(const {head,member} of suiteLinks){
+    const n=member.bounds,h=head.bounds;
+    const edges:{axis:'x'|'z';fixed:number;lo:number;hi:number}[]=[
+      {axis:'z' as const,fixed:n.z===h.z?n.z+n.d:n.z,lo:n.x,hi:n.x+n.w},
+      {axis:'x' as const,fixed:n.x===h.x?n.x+n.w:n.x,lo:n.z,hi:n.z+n.d},
+    ].sort((m,q)=>(q.hi-q.lo)-(m.hi-m.lo));
+    for(const edge of edges){
+      if(edge.hi-edge.lo<4)continue;
+      const positions=Array.from({length:edge.hi-edge.lo-3},(_,i)=>edge.lo+1+i)
+        .sort((m,q)=>Math.abs(m-(edge.lo+edge.hi)/2+1)-Math.abs(q-(edge.lo+edge.hi)/2+1));
+      const side=(r:Room,pos:number,near:boolean)=>{
+        const rect=edge.axis==='x'?{x:near?edge.fixed+1:edge.fixed-2,z:pos,w:2,d:2}:{x:pos,z:near?edge.fixed+1:edge.fixed-2,w:2,d:2};
+        for(let dx=0;dx<2;dx++)for(let dz=0;dz<2;dz++){
+          if(!insidePolygon(rect.x+dx+.5,rect.z+dz+.5,r.polygon))return false;
+          if(boundaryCells(r).has(`${rect.x+dx},${rect.z+dz}`))return false;
+        }
+        return true;
+      };
+      const pos=positions.find(pos=>(side(head,pos,true)&&side(member,pos,false))||(side(head,pos,false)&&side(member,pos,true)));
+      if(pos===undefined)continue;
+      candidates.push({a:head,b:member,axis:edge.axis,fixed:edge.fixed,pos,span:edge.hi-edge.lo,priority:0});
+      break;
+    }
+  }
   // Doors follow a household's access grammar rather than whichever walls happen to touch:
   // circulation carries every route, a chamber is a place you arrive at, and only rooms that already
   // have their own way in are allowed the extra connecting door a real plan would give them.
@@ -473,8 +510,11 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     edge.priority=-1;
   };
   for(const st of p.stairs){p.connections.push(st.roomIds as [string,string]);join(st.roomIds[0],st.roomIds[1]);for(const id of st.roomIds)degree.set(id,degree.get(id)!+1);}
+  const suiteMember=new Set(suiteLinks.map(l=>l.member.id));
+  /** A room in a suite is reached through its chamber; a door from it onto the passage is never cut. */
+  const strayFromSuite=(e:typeof candidates[number])=>(suiteMember.has(e.a.id)&&isCirculation(e.b))||(suiteMember.has(e.b.id)&&isCirculation(e.a));
   const wide=(m:typeof candidates[number],n:typeof candidates[number])=>n.span-m.span||m.a.id.localeCompare(n.a.id)||m.b.id.localeCompare(n.b.id);
-  const open=(e:typeof candidates[number])=>e.priority>=0;
+  const open=(e:typeof candidates[number])=>e.priority>=0&&!strayFromSuite(e);
   // Doors a household would never have cut. Service reaches the hall through the screens passage, not
   // through the hall body; nothing opens off the chapel but its antechapel; a bedchamber is not a back door.
   const IMPROPER:Partial<Record<RoomKind,RoomKind[]>>={hall:['service','storage','bedroom'],sacred:['service','storage','bedroom','study'],bedroom:['service','bedroom','sacred','hall'],service:['hall','sacred','bedroom'],storage:['hall','sacred'],study:['sacred']};
@@ -489,9 +529,12 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   // 1. The circulation skeleton: passages, stairs, galleries and the hall joined into one network.
   const spine=candidates.filter(e=>isCirculation(e.a)&&isCirculation(e.b)).sort(wide);
   for(const edge of spine)if(find(edge.a.id)!==find(edge.b.id))cut(edge);
+  // 1b. A suite is joined first: the closet takes its door from the chamber it was cut from.
+  for(const edge of candidates.filter(e=>suiteMember.has(e.a.id)||suiteMember.has(e.b.id)))
+    if(suiteLinks.some(l=>(l.head.id===edge.a.id&&l.member.id===edge.b.id)||(l.head.id===edge.b.id&&l.member.id===edge.a.id)))cut(edge);
   // 2. Every other room gets its own door onto that network, so no chamber is ever a corridor. The hall
   //    counts as circulation to cross, but not as a doorway for the kitchens, so proper doors go first.
-  const onto=(e:typeof candidates[number])=>isCirculation(e.a)!==isCirculation(e.b);
+  const onto=(e:typeof candidates[number])=>isCirculation(e.a)!==isCirculation(e.b)&&!suiteMember.has(e.a.id)&&!suiteMember.has(e.b.id);
   for(const only of [proper,open])for(const edge of candidates.filter(e=>only(e)&&onto(e)).sort(wide)){
     const chamber=isCirculation(edge.a)?edge.b:edge.a;
     if(toCirculation.get(chamber.id)!)continue;
@@ -576,8 +619,8 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     // joins them once a piece is in place. Moving furniture off a doorway is no good if it walls off a door.
     const ports:Point[]=[];
     for(const o of p.openings.filter(o=>o.type!=='window'&&o.roomIds.includes(r.id))){
-      const rb=r.bounds;
-      ports.push(o.axis==='x'?{x:o.x===rb.x?o.x+1:o.x-2,z:o.z}:{x:o.x,z:o.z===rb.z?o.z+1:o.z-2});
+      const near=o.axis==='x'?{x:o.x+1,z:o.z}:{x:o.x,z:o.z+1},far=o.axis==='x'?{x:o.x-2,z:o.z}:{x:o.x,z:o.z-2};
+      ports.push(insidePolygon(near.x+1,near.z+1,r.polygon)?near:far);
     }
     for(const st of p.stairs.filter(st=>st.roomIds.includes(r.id)))ports.push(st.landings[r.floorY===st.fromY?0:1]);
     const routesSurvive=(extra:Rect)=>{
@@ -602,9 +645,11 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     };
     const approaches=p.openings.filter(o=>o.type!=='window'&&o.roomIds.includes(r.id)).map(o=>{
       if(generous)return o.axis==='x'?{x:o.x-3,z:o.z-1,w:7,d:o.width+2}:{x:o.x-1,z:o.z-3,w:o.width+2,d:7};
-      const rb=r.bounds;
-      if(o.axis==='x'){const inward=o.x===rb.x;return {x:inward?o.x:o.x-3,z:o.z-1,w:3,d:o.width+2};}
-      const inward=o.z===rb.z;return {x:o.x-1,z:inward?o.z:o.z-3,w:o.width+2,d:3};
+      const inward=o.axis==='x'
+        ?insidePolygon(o.x+1.5,o.z+.5,r.polygon)
+        :insidePolygon(o.x+.5,o.z+1.5,r.polygon);
+      if(o.axis==='x')return {x:inward?o.x:o.x-3,z:o.z-1,w:4,d:o.width+2};
+      return {x:o.x-1,z:inward?o.z:o.z-3,w:o.width+2,d:4};
     });
     const addFurniture=(type:Room['furniture'][number]['type'],x:number,z:number,w:number,d:number,h=1)=>{
       if(w<=0||d<=0)return;
@@ -612,16 +657,13 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       const fits=(at:Point)=>{
         const box={...at,w,d};
         if(at.x<=b.x||at.z<=b.z||at.x+w>=b.x+b.w||at.z+d>=b.z+b.d)return false;
-        if(!insidePolygon(at.x+.5,at.z+.5,r.polygon)||!insidePolygon(at.x+w-.5,at.z+d-.5,r.polygon))return false;
+        for(const [cx,cz] of [[at.x+.5,at.z+.5],[at.x+w-.5,at.z+.5],[at.x+.5,at.z+d-.5],[at.x+w-.5,at.z+d-.5]])
+          if(!insidePolygon(cx,cz,r.polygon))return false;
         return !r.furniture.some(f=>intersects(f,box))&&!approaches.some(a=>intersects(a,box));
       };
       const tried:Point[]=[];
       if(fits({x,z}))tried.push({x,z});
-      if(!generous)for(let px=b.x+1;px+w<b.x+b.w;px++)for(let pz=b.z+1;pz+d<b.z+b.d;pz++){
-        // Against a wall: a piece stranded mid-floor is what parts a room in two.
-        if(!(px===b.x+1||px+w===b.x+b.w-1||pz===b.z+1||pz+d===b.z+b.d-1))continue;
-        if(fits({x:px,z:pz}))tried.push({x:px,z:pz});
-      }
+      if(!generous)for(let px=b.x+1;px+w<b.x+b.w;px++)for(let pz=b.z+1;pz+d<b.z+b.d;pz++)if(fits({x:px,z:pz}))tried.push({x:px,z:pz});
       tried.sort((m,n)=>(Math.abs(m.x-x)+Math.abs(m.z-z))-(Math.abs(n.x-x)+Math.abs(n.z-z))||m.x-n.x||m.z-n.z);
       for(const at of tried.slice(0,8)){
         if(!routesSurvive({...at,w,d}))continue;
