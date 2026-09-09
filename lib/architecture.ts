@@ -94,7 +94,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   const family=s.family==='auto'?pick(FAMILIES[s.kind]).id:s.family;
   const components:BuildingComponent[]=[];
   const small=s.size<80, organic=s.organic/100;
-  const hallW=small?18:ri(26,34),hallD=small?16:ri(22,28);
+  const hallW=small?16:ri(20,26),hallD=small?22:ri(32,40);
   function add(kind:ComponentKind,name:string,bounds:Rect,storeys:number,parent?:BuildingComponent,roof?:BuildingComponent['roof']) {
     if(components.some(c=>intersects(c.bounds,bounds)))return undefined;
     const chamfer=kind==='tower'?Math.min(4,Math.floor(bounds.w/5)):0;
@@ -136,7 +136,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   // A chapel belongs to the lord's side of the house: off the great chamber or the hall, reached without
   // crossing the kitchens. The service range is a last resort, and even then the chapel keeps its own antechapel.
   if(!small&&s.chapel&&s.kind!=='house'){
-    const chapelHosts=[domestic,hall,service].filter(Boolean) as BuildingComponent[];
+    const chapelHosts=[domestic?.kind==='tower'?undefined:domestic,hall,domestic,service].filter(Boolean) as BuildingComponent[];
     outer: for(const c of chapelHosts)for(const side of ['n','e','w','s'] as const){
       const chapel=attach(c,'chapel','Chapel',side,16,24,1,0);
       if(chapel){chapel.parentId=c.id;break outer;}
@@ -304,7 +304,17 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     if(c.kind==='hall'){
       room(c,s.kind==='house'?'Hearth hall':'Great hall','hall',{...b,d:b.d-5},0,c.topY,'dais','n');
       room(c,'Screens passage','circulation',{...b,z:b.z+b.d-5,d:5},0,c.topY);
-      if(c.topY>=12)room(c,'Minstrels’ gallery','gallery',family==='hall-house'?{...b,d:5}:{...b,z:b.z+b.d-5,d:5},6,c.topY);
+      if(c.topY>=12){
+        const loft=family==='hall-house'?{...b,d:5}:{...b,z:b.z+b.d-5,d:5};
+        const reached=components.some(o=>{
+          if(o.id===c.id||o.baseY>6||6>=o.topY)return false;
+          const f=componentFootprint(o,6,family),side=sharedSide(loft,f);
+          if(!side)return false;
+          const across=side==='n'||side==='s';
+          return (across?Math.min(loft.x+loft.w,f.x+f.w)-Math.max(loft.x,f.x):Math.min(loft.z+loft.d,f.z+f.d)-Math.max(loft.z,f.z))>=4;
+        });
+        if(reached)room(c,'Minstrels’ gallery','gallery',loft,6,c.topY);
+      }
       continue;
     }
     if(c.kind==='gatehouse') {room(c,c.name,'circulation',b,0,6);continue;}
@@ -518,7 +528,10 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   // Doors a household would never have cut. Service reaches the hall through the screens passage, not
   // through the hall body; nothing opens off the chapel but its antechapel; a bedchamber is not a back door.
   const IMPROPER:Partial<Record<RoomKind,RoomKind[]>>={hall:['service','storage','bedroom'],sacred:['service','storage','bedroom','study'],bedroom:['service','bedroom','sacred','hall'],service:['hall','sacred','bedroom'],storage:['hall','sacred'],study:['sacred']};
-  const improper=(e:typeof candidates[number])=>(IMPROPER[e.a.kind]??[]).includes(e.b.kind)||(IMPROPER[e.b.kind]??[]).includes(e.a.kind);
+  const chapelRooms=new Set(p.rooms.filter(r=>components.find(c=>c.id===r.componentId)?.kind==='chapel').map(r=>r.id));
+  const improper=(e:typeof candidates[number])=>(IMPROPER[e.a.kind]??[]).includes(e.b.kind)||(IMPROPER[e.b.kind]??[]).includes(e.a.kind)
+    ||(chapelRooms.has(e.a.id)&&!chapelRooms.has(e.b.id)&&!isCirculation(e.b))
+    ||(chapelRooms.has(e.b.id)&&!chapelRooms.has(e.a.id)&&!isCirculation(e.a));
   const proper=(e:typeof candidates[number])=>open(e)&&!improper(e);
   /** A second door onto circulation turns a private chamber into a shortcut somebody will take. */
   const crowds=(e:typeof candidates[number])=>[e.a,e.b].some(r=>{
@@ -530,8 +543,14 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   const spine=candidates.filter(e=>isCirculation(e.a)&&isCirculation(e.b)).sort(wide);
   for(const edge of spine)if(find(edge.a.id)!==find(edge.b.id))cut(edge);
   // 1b. A suite is joined first: the closet takes its door from the chamber it was cut from.
-  for(const edge of candidates.filter(e=>suiteMember.has(e.a.id)||suiteMember.has(e.b.id)))
-    if(suiteLinks.some(l=>(l.head.id===edge.a.id&&l.member.id===edge.b.id)||(l.head.id===edge.b.id&&l.member.id===edge.a.id)))cut(edge);
+  for(const link of suiteLinks){
+    const edge=candidates.find(e=>open(e)&&((e.a.id===link.head.id&&e.b.id===link.member.id)||(e.b.id===link.head.id&&e.a.id===link.member.id)));
+    if(edge){cut(edge);continue;}
+    suiteMember.delete(link.member.id);
+    const suite=p.suites.find(u=>u.id===link.member.suiteId);
+    if(suite){suite.roomIds=suite.roomIds.filter(id=>id!==link.member.id);if(suite.roomIds.length<2)p.suites=p.suites.filter(u=>u!==suite);}
+    link.member.suiteId=undefined;
+  }
   // 2. Every other room gets its own door onto that network, so no chamber is ever a corridor. The hall
   //    counts as circulation to cross, but not as a doorway for the kitchens, so proper doors go first.
   const onto=(e:typeof candidates[number])=>isCirculation(e.a)!==isCirculation(e.b)&&!suiteMember.has(e.a.id)&&!suiteMember.has(e.b.id);
@@ -569,9 +588,14 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       }
       return Infinity;
     };
+    let closed=0;
     for(const edge of ring){
       if(between(edge.a.id,edge.b.id)<4)continue;
-      cut(edge);neighbours.get(edge.a.id)!.push(edge.b.id);neighbours.get(edge.b.id)!.push(edge.a.id);
+      cut(edge);closed++;neighbours.get(edge.a.id)!.push(edge.b.id);neighbours.get(edge.b.id)!.push(edge.a.id);
+    }
+    if(!closed){
+      const chord=ring.find(open);
+      if(chord)cut(chord);
     }
   }
   // 6. Relief. Where two stretches of circulation still meet only through a chamber, that chamber is a
@@ -611,6 +635,8 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   }
   if(!entranceOpening)throw new Error('The composition has no usable exterior entrance.');
   p.entry={x:entranceOpening.x+(entranceOpening.axis==='z'?1:0),z:entranceOpening.z+(entranceOpening.axis==='x'?1:0)};p.openings.push(entranceOpening);
+  const joined=new Set(p.connections.flat());
+  for(const stray of p.rooms.filter(r=>r.kind==='gallery'&&!joined.has(r.id)))p.rooms=p.rooms.filter(r=>r!==stray);
   for(const r of p.rooms){
     const b=r.bounds;
     r.description=r.kind==='hall'?`The primary household hall rises ${r.ceilingY-r.floorY} blocks, with an open volume above and a screens passage at the service end.`:r.kind==='stairs'?'Reserved stair hall: two-block flights, three-block headroom and landings at each occupied level.':r.kind==='bedroom'?'A private chamber entered from a landing; household routes do not pass through it.':r.kind==='gallery'?'A partial timber gallery overlooking the hall. The central volume remains open to below.':`${r.name} in the ${components.find(c=>c.id===r.componentId)!.name.toLowerCase()}, connected to the household circulation.`;
@@ -670,9 +696,27 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
         r.furniture.push({type,...at,w,d,y:r.floorY+1,h,material:9});break;
       }
     };
-    if(r.kind==='hall'){const x=b.x+4,z=b.z+4;addFurniture('table',x,z,3,Math.max(4,b.d-9));addFurniture('bench',x-2,z,1,Math.max(4,b.d-9));addFurniture('bench',x+4,z,1,Math.max(4,b.d-9));if(b.w>22){addFurniture('table',b.x+b.w-8,z,3,Math.max(4,b.d-9));addFurniture('bench',b.x+b.w-10,z,1,Math.max(4,b.d-9));}addFurniture('table',b.x+7,b.z+2,Math.max(4,b.w-14),2);}
+    if(r.kind==='hall'){
+      const mid=b.x+Math.floor(b.w/2),high=b.z+2,length=Math.max(6,b.d-14);
+      addFurniture('dais',b.x+3,high,Math.max(6,b.w-6),3);
+      addFurniture('table',mid-Math.floor(Math.max(4,b.w-12)/2),high+1,Math.max(4,b.w-12),1);
+      addFurniture('hearth',mid-1,high+6,2,2,1);
+      const bench=(x:number)=>{addFurniture('table',x,high+9,2,length);addFurniture('bench',x-1,high+9,1,length);addFurniture('bench',x+2,high+9,1,length);};
+      bench(b.x+4);
+      if(b.w>=18)bench(b.x+b.w-6);
+    }
     else if(r.kind==='bedroom'){addFurniture('bed',b.x+2,b.z+2,Math.min(3,b.w-3),Math.min(4,b.d-3));addFurniture('shelf',b.x+b.w-2,b.z+2,1,Math.min(3,b.d-3),2);}
-    else if(r.kind==='service'){addFurniture('table',b.x+2,b.z+2,Math.min(4,b.w-4),2);if(b.d>9)addFurniture('hearth',b.x+2,b.z+b.d-3,3,1,2);}
+    else if(r.kind==='service'){
+      const cooking=r.name==='Kitchen'||r.name==='Bakehouse'||r.name==='Brewhouse';
+      if(cooking&&b.w>=9&&b.d>=9){
+        addFurniture('hearth',b.x+2,b.z+2,Math.min(5,b.w-5),2,2);
+        addFurniture('oven',b.x+b.w-4,b.z+2,2,3,2);
+        addFurniture('table',b.x+3,b.z+Math.floor(b.d/2),Math.max(3,Math.min(6,b.w-6)),2);
+      }else{
+        addFurniture('table',b.x+2,b.z+2,Math.min(4,b.w-4),2);
+        if(b.d>9)addFurniture('hearth',b.x+2,b.z+b.d-3,3,1,2);
+      }
+    }
     else if(r.kind==='study'){addFurniture('desk',b.x+2,b.z+2,3,2);addFurniture('shelf',b.x+2,b.z+b.d-2,Math.max(2,b.w-4),1,2);}
     else if(r.kind==='storage'){addFurniture('shelf',b.x+2,b.z+2,Math.max(2,b.w-4),1,2);if(b.d>8)addFurniture('shelf',b.x+2,b.z+b.d-2,Math.max(2,b.w-4),1,2);}
     else if(r.kind==='sacred'){addFurniture('altar',b.x+5,b.z+3,Math.max(3,b.w-10),2);for(let z=b.z+8;z<b.z+b.d-3;z+=3){addFurniture('bench',b.x+2,z,4,1);addFurniture('bench',b.x+b.w-6,z,4,1);}}

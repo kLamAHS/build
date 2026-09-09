@@ -5,7 +5,7 @@ export type Point={x:number;z:number};
 export type Rect=Point & {w:number;d:number};
 export type RoomKind='hall'|'bedroom'|'service'|'sacred'|'storage'|'study'|'circulation'|'stairs'|'gallery';
 export type ComponentKind='hall'|'domestic'|'service'|'tower'|'chapel'|'gatehouse'|'workshop'|'lodging';
-export type Furniture=Rect & {y:number;h:number;type:'table'|'bench'|'bed'|'shelf'|'hearth'|'desk'|'altar';material:number};
+export type Furniture=Rect & {y:number;h:number;type:'table'|'bench'|'bed'|'shelf'|'hearth'|'desk'|'altar'|'oven'|'well'|'dais';material:number};
 export type Room={id:string;name:string;kind:RoomKind;componentId:string;suiteId?:string;bounds:Rect;polygon:Point[];holes:Rect[];floorY:number;ceilingY:number;area:number;description:string;furniture:Furniture[]};
 /** Rooms that belong to one occupant and are entered as a set: a chamber with its own wardrobe or garderobe. */
 export type Suite={id:string;name:string;kind:'lodging'|'lord'|'service'|'gate';roomIds:string[];headId:string};

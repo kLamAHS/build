@@ -8,7 +8,22 @@ export function preciseSvg(node:ReactNode):ReactNode {return Children.map(node,c
 const polygonPath=(p:Point[])=>p.length?`M${p.map(v=>`${v.x},${v.z}`).join('L')}Z`:'';
 const rectPath=(x:number,z:number,w:number,d:number)=>`M${x} ${z}h${w}v${d}h${-w}Z`;
 const lines=(name:string)=>{const words=name.split(' ');return name.length>14&&words.length>1?[words.slice(0,Math.ceil(words.length/2)).join(' '),words.slice(Math.ceil(words.length/2)).join(' ')]:[name];};
-function Furniture({room}:{room:Room}){return <g fill="#f6eedb" stroke="#857b66" strokeWidth=".14">{room.furniture.map((f,i)=><g key={i}><rect x={f.x} y={f.z} width={f.w} height={f.d}/>{f.type==='bed'&&<><rect x={f.x+.3} y={f.z+.3} width={f.w-.6} height=".8" rx=".15"/><path d={`M${f.x} ${f.z+1.5}h${f.w}`}/></>}{f.type==='shelf'&&Array.from({length:f.w},(_,k)=><path key={k} d={`M${f.x+k+.4} ${f.z}v${f.d}`}/>)}{f.type==='hearth'&&<path d={`M${f.x+.3} ${f.z+.2}l${f.w-.6} ${f.d-.4}m0 ${-f.d+.4}l${-f.w+.6} ${f.d-.4}`}/>}</g>)}</g>;}
+const FIXED=new Set(['hearth','oven','well','dais','altar']);
+function Furniture({room}:{room:Room}){
+  return <g fill="#f6eedb" stroke="#857b66" strokeWidth=".14">{room.furniture.map((f,i)=>{
+    const cx=f.x+f.w/2,cz=f.z+f.d/2;
+    return <g key={i}>
+      <rect x={f.x} y={f.z} width={f.w} height={f.d} fill={FIXED.has(f.type)?'#e6ddc6':'#f6eedb'} strokeWidth={FIXED.has(f.type)?.22:.14}/>
+      {f.type==='bed'&&<><rect x={f.x+.3} y={f.z+.3} width={f.w-.6} height=".8" rx=".15"/><path d={`M${f.x} ${f.z+1.5}h${f.w}`}/></>}
+      {f.type==='shelf'&&Array.from({length:f.w},(_,k)=><path key={k} d={`M${f.x+k+.4} ${f.z}v${f.d}`}/>)}
+      {f.type==='hearth'&&<><path d={`M${f.x+.4} ${f.z+.4}h${f.w-.8}v${f.d-.8}h${-f.w+.8}Z`} fill="#d8ccb2"/><path d={`M${cx-.5} ${f.z+f.d-.7}q.5-1 .5-1.6.4.5.5 1 .3-.4.3-.9.5.7.5 1.5`} fill="none" strokeWidth=".16"/></>}
+      {f.type==='oven'&&<><path d={`M${f.x+.4} ${f.z+f.d-.4}v${-f.d+1.2}a${f.w/2-.4} ${f.w/2-.4} 0 0 1 ${f.w-.8} 0v${f.d-1.2}Z`} fill="#d8ccb2"/><path d={`M${cx} ${f.z+f.d-.4}v${-1}`} strokeWidth=".2"/></>}
+      {f.type==='well'&&<><circle cx={cx} cy={cz} r={Math.min(f.w,f.d)/2-.3} fill="#c9d3d6"/><circle cx={cx} cy={cz} r={Math.min(f.w,f.d)/2-.9} fill="#8fa6ab"/></>}
+      {f.type==='dais'&&<path d={`M${f.x+.5} ${f.z+f.d-.5}h${f.w-1}`} strokeWidth=".2" strokeDasharray=".7 .5"/>}
+      {f.type==='altar'&&<path d={`M${cx} ${f.z+.3}v${f.d-.6}M${cx-.8} ${f.z+.9}h1.6`} strokeWidth=".2"/>}
+    </g>;
+  })}</g>;
+}
 export function PlanDrawing({plan,floor,options,selected,onSelect,prefix='plan',layer}:{plan:Plan;floor:Floor;options:DrawingOptions;selected?:string;onSelect?:(id:string)=>void;prefix?:string;layer?:BlockLayer}){
   const b=plan.bounds,y=floor.elevation;
   const walls=layer?layer.runs.filter(r=>['wall','chimney'].includes(r.kind)).map(r=>rectPath(r.x,r.z,r.length,1)).join(''):plan.walls.filter(w=>w.y<=y+2&&w.y+w.h>y+2).map(w=>rectPath(w.x,w.z,w.w,w.d)).join('');
