@@ -30,14 +30,32 @@ number of independent routes, the deepest reach in doors, and any room a househo
 cross. `tryGenerate` composes several candidates and keeps the one that walks best. The studio shows the
 score beside the plan name and the door-by-door walk from the entrance for whichever room is selected.
 
-## Room shape and scale
+## Room proportion and the grain of a range
 
-A range is not a grid of equal boxes. The largest area its passages leave is kept whole and takes the room
-the range is for; every lesser area is cut into a cluster of smaller rooms. Across the standard set the
-largest room in a range is around ten times the smallest.
+A minimum area is satisfied by a strip ninety blocks long, and a target with no ceiling is satisfied by
+whatever the passages happen to leave over. Both produce the same building: a solar, a pantry and a
+household dining room each drawn as a band the length of the wing. So every room type carries an upper
+bound as well — the extent it wants along its rank, a proportion band it may not leave, and an area ceiling
+(`ROOM_FIT`). A range is cut into rooms in the order its programme matters, each taking the extent its own
+use asks for; what is left at the end is too small to stand as a room and goes back to the room before it,
+rather than being named as one. The audit rejects a candidate holding an ordinary room past 3.2:1 or past
+760 blocks, so a composition that cannot hold its programme is retried rather than furnished.
+
+The other half of the problem is which way a range is cut. A wing eighty blocks deep and twenty wide cannot
+be divided by a passage across it: both halves come out as strips the length of the wing. Such a range is
+walked along its length instead — one gallery down the flank that faces the rest of the house, with a rank
+of rooms behind it. A range along a court is walked on the court side, so the yard is fronted by a walk
+rather than by the backs of chambers. A range too deep for one rank takes the gallery down its middle with
+a rank either side. Where a neighbouring range meets a flank the gallery does not reach, the rank is capped
+with a cross passage at that end, so nobody's chamber becomes the way through.
+
+Across a 288-plan survey the largest room in a range is around ten times the smallest, no ordinary room is
+more than 2.5 times its own width, and the largest has taken 551 blocks. Before this, one in twenty-nine was
+past three times its width, the worst was eighteen times, and one pantry had taken 3,220.
 
 Shape carries meaning where it can. A chapel nave closes on a stepped half-round at the end furthest from
-its door. A great hall's high end is canted back toward the dais. A principal room wraps a closet in its
+its door. A great hall's high end is canted back toward the dais — except at a corner another range stands
+against, which stays square, because that is where its door has to go. A principal room wraps a closet in its
 angle, and the closet keeps its own frontage on the passage so it is entered from circulation rather than
 through the room it is cut from. A chamber in the head of a tower is closed as an octagon.
 
@@ -51,7 +69,12 @@ blocks a household needs.
 `courtyard-castle` is the archetype laid out site first. The court is placed before anything else, and the
 ranges are set against it: the great hall closes the head of the yard with its screens end opening onto it,
 the kitchen range runs down the service side, the private accommodation and the chapel down the other, and
-a gatehouse closes the foot with a gate passage between two guard chambers. A well stands in the yard.
+a gatehouse closes the foot with a carriage passage and lodging either side of it. A well stands in the yard.
+
+Each range is one rank of rooms deep behind a court gallery, which is what makes the yard read as a yard;
+the budget past that goes into the court rather than into the depth of the wing. The hall is entered
+through its own screens and, at the dais, from the private side — never off the passage running along its
+flank, which is what turns a great hall into a wide corridor.
 
 The court is a room of the plan rather than a border drawn round it, so ranges are entered from the yard
 and the approach reads as a sequence: **gate passage, court, screens passage, hall.** Nothing is discovered

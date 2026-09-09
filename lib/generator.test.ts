@@ -234,6 +234,64 @@ void test('rooms have shape and scale, not a grid of equal boxes',()=>{
   const chapel=reference.rooms.find(r=>r.kind==='sacred')!;
   assert.ok(chapel.polygon.length>8,'the chapel has no apse');
 });
+void test('ordinary rooms keep their proportions: no strip a wing long, nothing that has eaten its range',()=>{
+  // The complaint this answers: a solar, a pantry and a household dining room each drawn as a band the
+  // length of the wing, because a minimum area is satisfied by a strip and a target with no ceiling is
+  // satisfied by whatever is left over. Every ordinary room now has an upper bound on both.
+  const ORDINARY=['bedroom','study','service','storage'];
+  let counted=0,worstShape=0,worstSize=0,shape='',size='';
+  for(const kind of ['house','manor','castle'] as const)for(const family of FAMILIES[kind])for(const budget of [96,192,384]){
+    const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size:budget,floors:3,seed:`FIT-${budget}`});
+    for(const r of p.rooms){
+      if(!ORDINARY.includes(r.kind))continue;
+      counted++;
+      const w=r.bounds.w-1,d=r.bounds.d-1,aspect=Math.max(w,d)/Math.min(w,d);
+      if(aspect>worstShape){worstShape=aspect;shape=`${r.name} ${w}x${d} (${family.id}/${budget})`;}
+      if(w*d>worstSize){worstSize=w*d;size=`${r.name} ${w}x${d} (${family.id}/${budget})`;}
+    }
+  }
+  assert.ok(counted>500,`only ${counted} ordinary rooms surveyed`);
+  assert.ok(worstShape<=3.2,`the longest ordinary room is ${worstShape.toFixed(1)} times its width: ${shape}`);
+  assert.ok(worstSize<=760,`the largest ordinary room has taken ${worstSize} blocks: ${size}`);
+});
+void test('a range deeper than it is wide is walked along its length, not cut into two long strips',()=>{
+  // A wing eighty blocks deep and twenty wide cannot be divided by a passage across it: both halves come
+  // out as strips the length of the wing. Such a range takes one walk down its flank and a rank behind it.
+  const p=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'courtyard-castle',size:256,floors:2,seed:'GRAIN'});
+  const wing=p.components.find(c=>c.kind==='domestic'&&c.bounds.d>=c.bounds.w*1.7);
+  assert.ok(wing,'the courtyard castle has no deep residential range');
+  const inWing=p.rooms.filter(r=>r.componentId===wing!.id&&r.floorY===0);
+  const walk=inWing.find(r=>isCirculation(r)&&r.bounds.d>=wing!.bounds.d-1);
+  assert.ok(walk,`no walk runs the length of the wing: ${inWing.filter(isCirculation).map(r=>`${r.name} ${r.bounds.w}x${r.bounds.d}`).join(', ')}`);
+  // The rank behind it is a sequence of rooms, each of them a room rather than a band.
+  const rank=inWing.filter(r=>!isCirculation(r));
+  assert.ok(rank.length>=3,`the wing holds only ${rank.length} rooms behind its walk`);
+  for(const r of rank)assert.ok(r.bounds.d<wing!.bounds.d/2,`${r.name} is ${r.bounds.w}x${r.bounds.d} in a wing ${wing!.bounds.d} deep`);
+  // And the walk fronts the court, so the yard has an edge rather than a row of chamber walls.
+  const court=p.rooms.find(r=>r.kind==='court')!;
+  assert.ok(p.connections.some(([a,b])=>(a===walk!.id&&b===court.id)||(b===walk!.id&&a===court.id)),'the wing walk does not open onto the court');
+});
+void test('the hall is entered through its own screens, never off a passage in its flank',()=>{
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    const hall=p.rooms.find(r=>r.kind==='hall')!;
+    const doors=p.connections.filter(e=>e.includes(hall.id)).map(([a,b])=>p.rooms.find(r=>r.id===(a===hall.id?b:a))!);
+    assert.ok(doors.some(r=>r.name==='Screens passage'),`${settings.seed}: the hall has no screens passage door`);
+    // Any other door into the hall is at one of its ends — the dais, or the screens — never mid-flank.
+    const b=hall.bounds,along=b.d>=b.w?'z':'x',lo=along==='z'?b.z:b.x,len=along==='z'?b.d:b.w;
+    for(const o of p.openings.filter(o=>o.type==='door'&&o.roomIds.includes(hall.id))){
+      const other=p.rooms.find(r=>r.id===o.roomIds.find(id=>id!==hall.id))!;
+      if(other.componentId===hall.componentId)continue;
+      const flank=(along==='z')!==(o.axis==='z');
+      const at=along==='z'?o.z:o.x;
+      if(!flank||at<=lo+7||at>=lo+len-8)continue;
+      // Mid-flank is a last resort, cut only where a range has no other way into the house at all.
+      assert.ok(isCirculation(other),`${settings.seed}: ${other.name} opens into the middle of the hall's flank`);
+      const without={...p,connections:p.connections.filter(([a,b])=>!o.roomIds.includes(a)||!o.roomIds.includes(b))};
+      assert.ok(accessGraph(without).unreachable.includes(other.id),`${settings.seed}: ${other.name} takes a mid-flank hall door it does not need`);
+    }
+  }
+});
 void test('a suite is entered as a set: its closet opens off its chamber, not off the corridor',()=>{
   // The critique this answers: "several guest wardrobes appear to open from shared passages rather than
   // directly from their associated guest chambers ... a poor default for storage belonging to a suite."
