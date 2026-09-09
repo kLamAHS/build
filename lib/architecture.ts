@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Family, type Opening, type GenerationResult, type BlockBox } from './model.ts';
+import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type GenerationResult, type BlockBox } from './model.ts';
 import { isCirculation, navigationReport, articulationPoints, ROOM_PRIVACY } from './navigation.ts';
 import { auditArchitecture } from './architectural-audit.ts';
 
