@@ -17,7 +17,10 @@ export type BlockBox={x:number;y:number;z:number;w:number;h:number;d:number;mate
 export type Chimney={bounds:Rect;fromY:number;toY:number;componentId:string};
 export type Court={id:string;name:string;bounds:Rect;gate:Point;wallHeight:number};
 export type Route={id:string;name:string;points:Point[];width:number};
-export type Plan={schemaVersion:2;generatorVersion:'2.0';name:string;settings:Settings;family:Family;components:BuildingComponent[];rooms:Room[];floors:Floor[];openings:Opening[];stairs:Stair[];chimneys:Chimney[];courts:Court[];routes:Route[];blocks:BlockBox[];walls:BlockBox[];slabs:BlockBox[];roofs:BlockBox[];supports:BlockBox[];bounds:Rect;minY:number;maxY:number;width:number;depth:number;totalArea:number;entry:Point;connections:[string,string][];validation:{valid:boolean;issues:string[]};signature:string};
+export type Transit={roomId:string;name:string;kind:RoomKind;floorY:number;strands:string[]};
+/** How the finished plan actually walks: forced crossings, route length and alternative routes. */
+export type Navigation={maxDepth:number;meanDepth:number;loops:number;unreachable:string[];transits:Transit[];strandedRooms:number;score:number};
+export type Plan={schemaVersion:2;generatorVersion:'2.0';name:string;settings:Settings;family:Family;components:BuildingComponent[];rooms:Room[];floors:Floor[];openings:Opening[];stairs:Stair[];chimneys:Chimney[];courts:Court[];routes:Route[];blocks:BlockBox[];walls:BlockBox[];slabs:BlockBox[];roofs:BlockBox[];supports:BlockBox[];bounds:Rect;minY:number;maxY:number;width:number;depth:number;totalArea:number;entry:Point;connections:[string,string][];validation:{valid:boolean;issues:string[]};navigation:Navigation;signature:string};
 export type BuildingPlanV2=Plan;
 export type GenerationResult={ok:true;plan:Plan}|{ok:false;error:string};
 export const FAMILIES:Record<BuildKind,{id:Family;name:string;description:string}[]>={

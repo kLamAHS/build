@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { generatePlan, tryGenerate } from './architecture.ts';
 import { DEFAULT_SETTINGS, FAMILIES, insidePolygon, type Settings, type Plan } from './model.ts';
 import { voxelize, prepareMeshes, SparseBlocks } from './voxels.ts';
+import { accessGraph, transitViolations, isCirculation, routeToRoom, navigationReport } from './navigation.ts';
 
 export const representatives:Settings[]=(['house','manor','castle'] as const).flatMap(kind=>[128,256].flatMap(size=>[0,1,2].map(i=>({...DEFAULT_SETTINGS,kind,size,seed:`REVIEW-${kind}-${size}-${i}`,family:FAMILIES[kind][i].id}))));
 const reference=generatePlan(DEFAULT_SETTINGS);
@@ -40,7 +41,23 @@ function audit(p:Plan){
     assert.ok(r.floorY<c.topY&&c.baseY<r.floorY);
     assert.ok(p.supports.some(b=>b.componentId===c.id&&b.y===r.floorY-1),`${r.name} lacks a supporting structure`);
   }
-  for(const r of p.rooms.filter(r=>r.kind==='bedroom'))assert.equal(p.connections.filter(edge=>edge.includes(r.id)).length,1,'A route crosses a bedroom');
+  const graph=accessGraph(p);
+  assert.equal(graph.unreachable.length,0,`${p.settings.seed}: ${graph.unreachable.length} rooms have no route from the entrance`);
+  const forced=transitViolations(p,graph);
+  assert.deepEqual(forced.map(t=>`${t.name} strands ${t.strands.length}`),[],`${p.settings.seed}: a household is forced to cross these rooms`);
+  for(const r of p.rooms.filter(r=>!isCirculation(r))){
+    const doors=p.connections.filter(e=>e.includes(r.id)).map(([a,b])=>p.rooms.find(x=>x.id===(a===r.id?b:a))!);
+    assert.ok(doors.some(isCirculation),`${p.settings.seed}: ${r.name} has no door onto circulation`);
+  }
+  assert.ok(p.navigation.loops>=1,`${p.settings.seed}: the doors form a bare tree with only one route to everywhere`);
+  // The chapel is entered from its antechapel or a passage, never from a kitchen, a store or a bedchamber.
+  for(const [a,b] of p.connections){
+    const [m,n]=[a,b].map(id=>p.rooms.find(r=>r.id===id)!);
+    if(!m||!n)continue;
+    const kinds=[m.kind,n.kind];
+    if(kinds.includes('sacred'))assert.ok(kinds.every(k=>k==='sacred'||['circulation','stairs','gallery','hall'].includes(k)),`${p.settings.seed}: a door joins ${m.name} to ${n.name}`);
+    assert.ok(!(kinds.includes('bedroom')&&(kinds.includes('service')||kinds.includes('hall'))),`${p.settings.seed}: a door joins ${m.name} to ${n.name}`);
+  }
   for(const f of p.floors){
     const layer=grid.layer(f.elevation+2);let count=0;
     for(const run of layer.runs)for(let x=run.x;x<run.x+run.length;x++){assert.equal(grid.material(x,layer.y,run.z),run.material);count++;}
@@ -85,4 +102,48 @@ test('greedy exposed faces and layers come from exactly the same occupied cells'
   for(const m of mesh)for(let i=0;i<m.indices.length;i+=3){const points=[0,1,2].map(k=>{const a=m.indices[i+k]*3;return [m.positions[a],m.positions[a+1],m.positions[a+2]];});const a=points[1].map((n,j)=>n-points[0][j]),b=points[2].map((n,j)=>n-points[0][j]);surface+=Math.hypot(a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0])/2;}
   let faces=0;for(let x=-1;x<2;x++)for(let z=-1;z<3;z++)for(let y=0;y<2;y++)if(grid.material(x,y,z))for(const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]])if(!grid.material(x+dx,y+dy,z+dz))faces++;
   assert.equal(surface,faces);assert.equal(grid.layer(0).counts[1],11);assert.equal(grid.material(0,0,0),0);
+});
+test('a chapel is never reached through the kitchens, and no chamber is a corridor',()=>{
+  // The reported defect: the only door into the chapel opened off the kitchen, so the household walked
+  // Entrance -> Screens passage -> Great hall -> Cross passage -> Kitchen -> Chapel to reach the altar.
+  const chapel=reference.rooms.find(r=>r.kind==='sacred')!;
+  const route=routeToRoom(reference,chapel.id);
+  assert.ok(route.length>1,'the chapel has no route from the entrance');
+  assert.deepEqual(route.slice(0,-1).filter(r=>!isCirculation(r)).map(r=>r.name),[],`route to the chapel: ${route.map(r=>r.name).join(' -> ')}`);
+  const approach=route[route.length-2];
+  assert.ok(approach.kind==='circulation'||approach.kind==='hall',`the chapel is entered from ${approach.name}`);
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    for(const sacred of p.rooms.filter(r=>r.kind==='sacred')){
+      const crossed=routeToRoom(p,sacred.id).slice(0,-1).filter(r=>!isCirculation(r));
+      assert.deepEqual(crossed.map(r=>r.name),[],`${settings.seed}: the chapel is reached through ${crossed.map(r=>r.name).join(', ')}`);
+    }
+  }
+});
+test('every family and size walks well: no forced crossings, real alternative routes, shallow reach',()=>{
+  const reports=[];
+  for(const kind of ['house','manor','castle'] as const)for(const family of FAMILIES[kind])for(const size of [96,160,256]){
+    const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size,floors:3,seed:`WALK-${size}`});
+    const nav=navigationReport(p);
+    assert.deepEqual(nav.transits.map(t=>t.name),[],`${kind}/${family.id}/${size}: forced to cross ${nav.transits.map(t=>t.name).join(', ')}`);
+    assert.equal(nav.unreachable.length,0,`${kind}/${family.id}/${size}: unreachable rooms`);
+    assert.ok(nav.loops>=1,`${kind}/${family.id}/${size}: the doors form a bare tree`);
+    assert.deepEqual(nav,p.navigation,'the plan carries the same report the module computes');
+    reports.push(nav);
+  }
+  const mean=reports.reduce((n,r)=>n+r.score,0)/reports.length;
+  assert.ok(mean>=80,`mean navigability ${mean.toFixed(1)} is below the 80 this generator is expected to hold`);
+});
+test('every family builds across the size and storey range, including chamfered towers',()=>{
+  // A passage hugging a tower's wall pinched below two walkable blocks where the chamfer cuts the corner,
+  // which the voxel audit rejected and which no reroll could recover.
+  const failures:string[]=[];
+  for(const kind of ['house','manor','castle'] as const)for(const family of FAMILIES[kind])
+  for(const size of [64,160,320,512])for(const floors of [1,4,8]){
+    const settings={...DEFAULT_SETTINGS,kind,family:family.id,size,floors,seed:`BUILDABLE-${floors}`};
+    const result=tryGenerate(settings);
+    if(!result.ok)failures.push(`${kind}/${family.id}/${size}/${floors}: ${result.error}`);
+    else assert.equal(result.plan.navigation.unreachable.length,0,`${kind}/${family.id}/${size}/${floors}: unreachable rooms`);
+  }
+  assert.deepEqual(failures,[]);
 });
