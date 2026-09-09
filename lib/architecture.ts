@@ -214,6 +214,13 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     const at=passageZ.get(`${o.id}:${y/6}`);
     return at===undefined?undefined:[at,at+bandOf(o)];
   }
+  // A household has one lord's lodging and one great kitchen. Later ranges of the same kind are the
+  // second-rank buildings a real estate accumulates: guest lodgings, a brewhouse, a smithy.
+  const rankInKind=new Map<string,number>();
+  {
+    const seen=new Map<ComponentKind,number>();
+    for(const c of components){const n=seen.get(c.kind)??0;rankInKind.set(c.id,n);seen.set(c.kind,n+1);}
+  }
   for(const c of components){
     const b=c.bounds;
     if(c.kind==='hall'){
@@ -303,10 +310,11 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       if(south.spur)room(c,'Passage','circulation',south.spur,y);
       let program:[string,RoomKind][];
       if(f<0)program=[['Wine cellar','storage'],['Root store','storage'],['Strong room','storage'],['Buttery store','storage'],['Ice store','storage']];
-      else if(c.kind==='service'&&f===0)program=[['Kitchen','service'],['Pantry & buttery','storage'],['Scullery','service'],['Larder','storage'],['Wet larder','storage']];
-      else if(c.kind==='workshop'&&f===0)program=[['Workshop','service'],['Counting room','study'],['Goods store','storage'],['Tool store','storage'],['Drying loft','storage']];
+      else if(c.kind==='service'&&f===0)program=rankInKind.get(c.id)?[['Brewhouse','service'],['Bakehouse','service'],['Laundry','service'],['Dairy','storage'],['Salting house','storage']]:[['Kitchen','service'],['Pantry & buttery','storage'],['Scullery','service'],['Larder','storage'],['Wet larder','storage']];
+      else if(c.kind==='workshop'&&f===0)program=rankInKind.get(c.id)?[['Smithy','service'],['Joiner’s shop','service'],['Timber store','storage'],['Chandlery','service'],['Cart shed','storage']]:[['Workshop','service'],['Counting room','study'],['Goods store','storage'],['Tool store','storage'],['Drying loft','storage']];
       else if(c.kind==='tower'&&f===0)program=[['Guardroom','service'],['Armoury','storage'],['Steward’s office','study'],['Muniment room','storage'],['Watch room','service']];
-      else if(f===0&&c.kind==='domestic')program=[['Solar','study'],['Withdrawing room','study'],['Household dining','service'],['Parlour','study'],['Pantry','storage']];
+      else if(f===0&&c.kind==='domestic')program=rankInKind.get(c.id)?[['Guest hall','service'],['Steward’s lodging','study'],['Guest parlour','study'],['Household store','storage'],['Linen room','storage']]:[['Solar','study'],['Withdrawing room','study'],['Household dining','service'],['Parlour','study'],['Pantry','storage']];
+      else if(f===0&&c.kind==='lodging')program=[['Guest chamber','bedroom'],['Lodging hall','service'],['Chamberlain’s room','study'],['Linen room','storage'],['Guest wardrobe','storage']];
       else if(c.kind==='tower'&&f>0)program=[[f===c.storeys-1?'Tower chamber':'Solar chamber','bedroom'],['Antechamber','study'],['Wardrobe','storage'],['Guest chamber','bedroom'],['Linen room','storage']];
       else if(f===c.storeys-1&&f>1)program=[['Gabled bedchamber','bedroom'],['Wardrobe & study','study'],['Bedchamber','bedroom'],['Linen room','storage'],['Private study','study']];
       else program=[['Bedchamber','bedroom'],['Guest chamber','bedroom'],['Linen room','storage'],['Nurse’s chamber','bedroom'],['Wardrobe','storage']];
