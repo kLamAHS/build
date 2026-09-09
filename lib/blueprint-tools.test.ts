@@ -4,7 +4,7 @@ import { generatePlan, tryGenerate } from './architecture.ts';
 import { DEFAULT_SETTINGS } from './model.ts';
 import { registerBlueprintTools, validateSettings } from './blueprint-tools.ts';
 
-test('agent tools await generation and report versions, elevations and failures',async()=>{
+void test('agent tools await generation and report versions, elevations and failures',async()=>{
  let plan=generatePlan(DEFAULT_SETTINGS),floor=0,layer=0;const tools=new Map<string,{execute:(input:unknown)=>unknown}>();
  const cleanup=registerBlueprintTools({registerTool:t=>{tools.set(t.name,t);}}, {read:()=>plan,generate:async settings=>{await Promise.resolve();const result=tryGenerate(settings);if(result.ok)plan=result.plan;return result;},selectFloor:i=>{floor=i;},selectLayer:y=>{layer=y;}});
  assert.equal(tools.size,4);

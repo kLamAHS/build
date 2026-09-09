@@ -25,7 +25,7 @@ function byBruteForce(adjacency:Map<string,string[]>,entry:string){
   return cuts;
 }
 
-test('articulation points agree with brute force on 400 graphs, including repeated doors and self-loops',()=>{
+void test('articulation points agree with brute force on 400 graphs, including repeated doors and self-loops',()=>{
   for(let seed=1;seed<=400;seed++){
     const random=seeded(seed),count=2+Math.floor(random()*11);
     const ids=Array.from({length:count},(_,i)=>`r${i}`),adjacency=new Map(ids.map(id=>[id,[] as string[]]));
@@ -39,13 +39,13 @@ test('articulation points agree with brute force on 400 graphs, including repeat
   }
 });
 
-test('the entrance is never called a forced crossing, since every route crosses it',()=>{
+void test('the entrance is never called a forced crossing, since every route crosses it',()=>{
   // porch -> two wings that share nothing else. Closing the porch parts them, but you always enter through it.
   const adjacency=new Map([['porch',['westA','eastA']],['westA',['porch','westB']],['westB',['westA']],['eastA',['porch']]]);
   assert.deepEqual([...articulationPoints(graphOf(adjacency,'porch')).keys()],['westA']);
 });
 
-test('a room with no doors at all is reported unreachable rather than silently dropped',()=>{
+void test('a room with no doors at all is reported unreachable rather than silently dropped',()=>{
   const plan=generatePlan(DEFAULT_SETTINGS);
   const orphan={...plan,rooms:[...plan.rooms,{...plan.rooms[0],id:'orphan',name:'Sealed room'}]} as Plan;
   const graph=accessGraph(orphan);
@@ -53,7 +53,7 @@ test('a room with no doors at all is reported unreachable rather than silently d
   assert.deepEqual(routeToRoom(orphan,'orphan',graph),[]);
 });
 
-test('the report on the reference manor matches what the plan carries, and the walk starts at the entrance',()=>{
+void test('the report on the reference manor matches what the plan carries, and the walk starts at the entrance',()=>{
   const plan=generatePlan(DEFAULT_SETTINGS);
   assert.deepEqual(navigationReport(plan),plan.navigation);
   assert.deepEqual(transitViolations(plan),[]);

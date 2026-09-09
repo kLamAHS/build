@@ -65,23 +65,23 @@ function audit(p:Plan){
   }
   return grid;
 }
-test('permanent manor: a tall hall, three occupied domestic levels, service end and gallery',()=>{
+void test('permanent manor: a tall hall, three occupied domestic levels, service end and gallery',()=>{
   assert.equal(reference.name,'Alderhall Manor');assert.ok(reference.components.some(c=>c.kind==='domestic'&&c.storeys===3));
   assert.ok(reference.rooms.some(r=>r.kind==='gallery'&&r.floorY===6));assert.ok(reference.floors.find(f=>f.elevation===12)!.voids.length);
   assert.ok(reference.components.some(c=>c.baseY===0)&&reference.components.some(c=>c.baseY===-6));audit(reference);
 });
-test('18 medium and large representatives have coherent architecture and matching block geometry',()=>{for(const settings of representatives)audit(generatePlan(settings));});
-test('bounded failures report conflicts instead of emitting invalid buildings',()=>{
+void test('18 medium and large representatives have coherent architecture and matching block geometry',()=>{for(const settings of representatives)audit(generatePlan(settings));});
+void test('bounded failures report conflicts instead of emitting invalid buildings',()=>{
   assert.equal(tryGenerate({...DEFAULT_SETTINGS,size:513}).ok,false);assert.equal(tryGenerate({...DEFAULT_SETTINGS,floors:9}).ok,false);assert.equal(tryGenerate({...DEFAULT_SETTINGS,kind:'house',family:'palace'}).ok,false);
 });
-test('seed and version determinism, including semantic and voxel operations',()=>{assert.deepEqual(generatePlan(DEFAULT_SETTINGS),reference);assert.equal(reference.schemaVersion,2);assert.equal(reference.generatorVersion,'2.0');});
-test('upper floors change partitions, footprints, occupancy and voids',()=>{
+void test('seed and version determinism, including semantic and voxel operations',()=>{assert.deepEqual(generatePlan(DEFAULT_SETTINGS),reference);assert.equal(reference.schemaVersion,2);assert.equal(reference.generatorVersion,'2.0');});
+void test('upper floors change partitions, footprints, occupancy and voids',()=>{
   const c=reference.components.find(c=>c.kind==='domestic')!;
   const levels=[0,6,12].map(y=>reference.rooms.filter(r=>r.componentId===c.id&&r.floorY===y));
   assert.notDeepEqual(levels[0].map(r=>r.bounds),levels[1].map(r=>r.bounds));assert.notDeepEqual(levels[1].map(r=>r.bounds),levels[2].map(r=>r.bounds));
   const grid=voxelize(reference),hall=reference.rooms.find(r=>r.kind==='hall')!,x=hall.bounds.x+8,z=hall.bounds.z+8;assert.ok(grid.material(x,0,z));assert.equal(grid.material(x,6,z),0);
 });
-test('families and seeds vary component graph and proportions beyond rotations or translations',()=>{
+void test('families and seeds vary component graph and proportions beyond rotations or translations',()=>{
   const signatures=new Set<string>(),graphs=new Set<string>();
   for(const kind of ['castle','manor','house'] as const)for(const family of FAMILIES[kind])for(let i=0;i<4;i++){
     const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,seed:`VARIETY-${i}`,size:160});
@@ -90,20 +90,20 @@ test('families and seeds vary component graph and proportions beyond rotations o
   }
   assert.ok(signatures.size>=38,`Only ${signatures.size} distinct compositions`);assert.ok(graphs.size>=15,`Only ${graphs.size} connection graphs`);
 });
-test('compact, maximum storeys and a 512-block site remain sparse and navigable',()=>{
+void test('compact, maximum storeys and a 512-block site remain sparse and navigable',()=>{
   for(const kind of ['house','manor','castle'] as const)audit(generatePlan({...DEFAULT_SETTINGS,kind,family:'auto',size:48,floors:1,cellar:false,seed:'COMPACT'}));
   const start=performance.now(),p=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'double-ward',size:512,floors:8,seed:'LARGEST-512'}),grid=audit(p),meshes=prepareMeshes(grid);
   assert.ok(p.width<=512&&p.depth<=512);assert.equal(Math.max(...p.rooms.map(r=>r.floorY)),42);assert.ok(grid.stats().bytes<32*1024*1024);assert.ok(meshes.length<240);assert.ok(performance.now()-start<10000,'Largest build exceeded ten seconds');
   assert.ok(meshes.reduce((n,m)=>n+m.indices.length/3,0)<grid.stats().blocks*8);
 });
-test('greedy exposed faces and layers come from exactly the same occupied cells',()=>{
+void test('greedy exposed faces and layers come from exactly the same occupied cells',()=>{
   const grid=new SparseBlocks({x:-16,z:-16,w:48,d:48});grid.apply({x:-1,y:0,z:-1,w:3,d:4,h:2,material:1,kind:'wall',componentId:'test'});grid.apply({x:0,y:0,z:0,w:1,d:1,h:2,material:0,kind:'air',componentId:'test'});
   const mesh=prepareMeshes(grid);let surface=0;
   for(const m of mesh)for(let i=0;i<m.indices.length;i+=3){const points=[0,1,2].map(k=>{const a=m.indices[i+k]*3;return [m.positions[a],m.positions[a+1],m.positions[a+2]];});const a=points[1].map((n,j)=>n-points[0][j]),b=points[2].map((n,j)=>n-points[0][j]);surface+=Math.hypot(a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0])/2;}
   let faces=0;for(let x=-1;x<2;x++)for(let z=-1;z<3;z++)for(let y=0;y<2;y++)if(grid.material(x,y,z))for(const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]])if(!grid.material(x+dx,y+dy,z+dz))faces++;
   assert.equal(surface,faces);assert.equal(grid.layer(0).counts[1],11);assert.equal(grid.material(0,0,0),0);
 });
-test('a chapel is never reached through the kitchens, and no chamber is a corridor',()=>{
+void test('a chapel is never reached through the kitchens, and no chamber is a corridor',()=>{
   // The reported defect: the only door into the chapel opened off the kitchen, so the household walked
   // Entrance -> Screens passage -> Great hall -> Cross passage -> Kitchen -> Chapel to reach the altar.
   const chapel=reference.rooms.find(r=>r.kind==='sacred')!;
@@ -120,7 +120,7 @@ test('a chapel is never reached through the kitchens, and no chamber is a corrid
     }
   }
 });
-test('every family and size walks well: no forced crossings, real alternative routes, shallow reach',()=>{
+void test('every family and size walks well: no forced crossings, real alternative routes, shallow reach',()=>{
   const reports=[];
   for(const kind of ['house','manor','castle'] as const)for(const family of FAMILIES[kind])for(const size of [96,160,256]){
     const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size,floors:3,seed:`WALK-${size}`});
@@ -134,7 +134,7 @@ test('every family and size walks well: no forced crossings, real alternative ro
   const mean=reports.reduce((n,r)=>n+r.score,0)/reports.length;
   assert.ok(mean>=80,`mean navigability ${mean.toFixed(1)} is below the 80 this generator is expected to hold`);
 });
-test('every family builds across the size and storey range, including chamfered towers',()=>{
+void test('every family builds across the size and storey range, including chamfered towers',()=>{
   // A passage hugging a tower's wall pinched below two walkable blocks where the chamfer cuts the corner,
   // which the voxel audit rejected and which no reroll could recover.
   const failures:string[]=[];
@@ -161,7 +161,7 @@ function loadBearing(p:Plan,roomId:string){
     return [...articulationPoints({adjacency,depth:new Map(),entry,unreachable:[]}).keys()].some(id=>{const r=byId.get(id);return r&&!isCirculation(r);});
   });
 }
-test('chambers are furnished, lit and private: a bed to sleep in and no second way through',()=>{
+void test('chambers are furnished, lit and private: a bed to sleep in and no second way through',()=>{
   // Regressions caught after the circulation work: a fixed 3x4 bed and a door clearance reaching seven
   // blocks through the wall left 27% of bedchambers empty, and extra doors turned 16% into shortcuts.
   let bedrooms=0,bare=0,shortcuts=0,windowless=0,landlocked=0;
@@ -188,7 +188,7 @@ test('chambers are furnished, lit and private: a bed to sleep in and no second w
   assert.equal(shortcuts,0,`${shortcuts} bedchambers have a second door onto circulation that nothing needed`);
   assert.ok((windowless-landlocked)/Math.max(1,windowless)<=0.5,`${windowless-landlocked} of ${windowless} windowless chambers do have an outside wall`);
 });
-test('rooms have shape and scale, not a grid of equal boxes',()=>{
+void test('rooms have shape and scale, not a grid of equal boxes',()=>{
   // The complaint this answers: "a collection of hallways and rectangle rooms packed together".
   let shaped=0,rooms=0;const ratios:number[]=[];
   for(const settings of representatives){
