@@ -30,6 +30,22 @@ number of independent routes, the deepest reach in doors, and any room a househo
 cross. `tryGenerate` composes several candidates and keeps the one that walks best. The studio shows the
 score beside the plan name and the door-by-door walk from the entrance for whichever room is selected.
 
+## Room shape and scale
+
+A range is not a grid of equal boxes. The largest area its passages leave is kept whole and takes the room
+the range is for; every lesser area is cut into a cluster of smaller rooms. Across the standard set the
+largest room in a range is around ten times the smallest.
+
+Shape carries meaning where it can. A chapel nave closes on a stepped half-round at the end furthest from
+its door. A great hall's high end is canted back toward the dais. A principal room wraps a closet in its
+angle, and the closet keeps its own frontage on the passage so it is entered from circulation rather than
+through the room it is cut from. A chamber in the head of a tower is closed as an octagon.
+
+The voxel pipeline follows `Room.polygon` throughout — walls, floor, windows, the drawing and the audit —
+so these are real geometry rather than a drawing convention. Two rules bound them: a room keeps one
+straight four-block run of wall to receive its door, and its floor never pinches below the two walkable
+blocks a household needs.
+
 ## Model and scope
 
 Plans are deterministic from the complete settings and seed. A plan unit represents one chosen block, metre, or foot; changing the unit label is a scale interpretation, not a conversion. Room measures are approximate. These are conceptual creative build plans, with furnished floor diagrams and a floor overview. They do not export Minecraft schematics, construction documents, terrain-aware placement, or a solid 3D model.

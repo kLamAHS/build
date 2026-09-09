@@ -188,3 +188,32 @@ test('chambers are furnished, lit and private: a bed to sleep in and no second w
   assert.equal(shortcuts,0,`${shortcuts} bedchambers have a second door onto circulation that nothing needed`);
   assert.ok((windowless-landlocked)/Math.max(1,windowless)<=0.5,`${windowless-landlocked} of ${windowless} windowless chambers do have an outside wall`);
 });
+test('rooms have shape and scale, not a grid of equal boxes',()=>{
+  // The complaint this answers: "a collection of hallways and rectangle rooms packed together".
+  let shaped=0,rooms=0;const ratios:number[]=[];
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    for(const r of p.rooms){
+      rooms++;
+      if(r.polygon.length>4)shaped++;
+      // Whatever its shape, a room keeps a straight run of wall long enough to take a door.
+      const b=r.bounds;
+      assert.ok(b.w>=4&&b.d>=4,`${settings.seed}: ${r.name} is ${b.w}x${b.d}`);
+    }
+    const byRange=new Map<string,number[]>();
+    for(const r of p.rooms){
+      if(isCirculation(r))continue;
+      const key=`${r.componentId}:${r.floorY}`;
+      byRange.set(key,[...(byRange.get(key)??[]),r.area]);
+    }
+    for(const areas of byRange.values())if(areas.length>1)ratios.push(Math.max(...areas)/Math.min(...areas));
+  }
+  const shapedShare=shaped/rooms,hierarchy=ratios.reduce((a,b)=>a+b,0)/ratios.length;
+  assert.ok(shapedShare>=0.05,`only ${(shapedShare*100).toFixed(1)}% of rooms are anything but a rectangle`);
+  assert.ok(hierarchy>=3,`the largest room in a range is only ${hierarchy.toFixed(1)}x the smallest`);
+  // The two rooms whose shape carries meaning.
+  const hall=reference.rooms.find(r=>r.kind==='hall')!;
+  assert.ok(hall.polygon.length>4,'the great hall has no dais end');
+  const chapel=reference.rooms.find(r=>r.kind==='sacred')!;
+  assert.ok(chapel.polygon.length>8,'the chapel has no apse');
+});

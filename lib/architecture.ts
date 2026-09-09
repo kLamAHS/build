@@ -18,7 +18,7 @@ export function validateSettings(input:Settings):Settings {
 const names=['Alder','Raven','Briar','Oak','Ash','Hearth','Rowan','Thorn','Grey','Fox'];
 const sectors=['North','East','South','West','Garden','Orchard','Court','Meadow','River','Old'];
 const interior=(r:Rect):Rect=>({x:r.x+1,z:r.z+1,w:r.w-1,d:r.d-1});
-export type RoomShape='rect'|'canted'|'apse'|'octagon'|'ell';
+export type RoomShape='rect'|'canted'|'apse'|'octagon'|'ell'|'dais';
 /** Corners cut back at forty-five degrees. The straight runs between them still carry the doors. */
 function cantedPolygon(b:Rect,cut:number):Point[] {
   const c=Math.max(1,Math.min(cut,Math.floor((b.w-4)/2),Math.floor((b.d-4)/2)));
@@ -54,7 +54,18 @@ function ellPolygon(b:Rect,notch:Rect):Point[] {
   if(west)return [{x:b.x,z:b.z},{x:b.x+b.w,z:b.z},{x:b.x+b.w,z:b.z+b.d},{x:nx,z:b.z+b.d},{x:nx,z:nz},{x:b.x,z:nz}];
   return [{x:b.x,z:b.z},{x:b.x+b.w,z:b.z},{x:b.x+b.w,z:nz},{x:nx,z:nz},{x:nx,z:b.z+b.d},{x:b.x,z:b.z+b.d}];
 }
+/** Only the two corners at one end cut back, the way a great hall widens its floor toward the dais. */
+function daisPolygon(b:Rect,side:'n'|'s'|'e'|'w'):Point[] {
+  const across=side==='e'||side==='w'?b.d:b.w;
+  const c=Math.max(2,Math.min(Math.floor(across/5),Math.floor((across-4)/2)));
+  if(c<2)return rectPolygon(b);
+  if(side==='n')return [{x:b.x+c,z:b.z},{x:b.x+b.w-c,z:b.z},{x:b.x+b.w,z:b.z+c},{x:b.x+b.w,z:b.z+b.d},{x:b.x,z:b.z+b.d},{x:b.x,z:b.z+c}];
+  if(side==='s')return [{x:b.x,z:b.z},{x:b.x+b.w,z:b.z},{x:b.x+b.w,z:b.z+b.d-c},{x:b.x+b.w-c,z:b.z+b.d},{x:b.x+c,z:b.z+b.d},{x:b.x,z:b.z+b.d-c}];
+  if(side==='e')return [{x:b.x,z:b.z},{x:b.x+b.w-c,z:b.z},{x:b.x+b.w,z:b.z+c},{x:b.x+b.w,z:b.z+b.d-c},{x:b.x+b.w-c,z:b.z+b.d},{x:b.x,z:b.z+b.d}];
+  return [{x:b.x+c,z:b.z},{x:b.x+b.w,z:b.z},{x:b.x+b.w,z:b.z+b.d},{x:b.x+c,z:b.z+b.d},{x:b.x,z:b.z+b.d-c},{x:b.x,z:b.z+c}];
+}
 function shapePolygon(b:Rect,shape:RoomShape,side:'n'|'s'|'e'|'w',notch?:Rect):Point[] {
+  if(shape==='dais')return daisPolygon(b,side);
   if(shape==='ell'&&notch)return ellPolygon(b,notch);
   if(shape==='canted')return cantedPolygon(b,Math.max(2,Math.floor(Math.min(b.w,b.d)/6)));
   if(shape==='octagon')return cantedPolygon(b,Math.floor(Math.min(b.w,b.d)/3));
@@ -281,7 +292,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   for(const c of components){
     const b=c.bounds;
     if(c.kind==='hall'){
-      room(c,s.kind==='house'?'Hearth hall':'Great hall','hall',{...b,d:b.d-5},0,c.topY);
+      room(c,s.kind==='house'?'Hearth hall':'Great hall','hall',{...b,d:b.d-5},0,c.topY,'dais','n');
       room(c,'Screens passage','circulation',{...b,z:b.z+b.d-5,d:5},0,c.topY);
       if(c.topY>=12)room(c,'Minstrels’ gallery','gallery',family==='hall-house'?{...b,d:5}:{...b,z:b.z+b.d-5,d:5},6,c.topY);
       continue;
