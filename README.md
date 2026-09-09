@@ -46,6 +46,18 @@ so these are real geometry rather than a drawing convention. Two rules bound the
 straight four-block run of wall to receive its door, and its floor never pinches below the two walkable
 blocks a household needs.
 
+## The courtyard castle
+
+`courtyard-castle` is the archetype laid out site first. The court is placed before anything else, and the
+ranges are set against it: the great hall closes the head of the yard with its screens end opening onto it,
+the kitchen range runs down the service side, the private accommodation and the chapel down the other, and
+a gatehouse closes the foot with a gate passage between two guard chambers. A well stands in the yard.
+
+The court is a room of the plan rather than a border drawn round it, so ranges are entered from the yard
+and the approach reads as a sequence: **gate passage, court, screens passage, hall.** Nothing is discovered
+by packing rooms and drawing a wall round the result. Below 128 blocks there is not enough ground for a
+quadrangle and the composition falls back to the hall-and-wings massing.
+
 ## The household, and the site it stands on
 
 The generator organises a household before it divides rooms.

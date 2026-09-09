@@ -11,6 +11,7 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
     for(let h=1;h<=3;h++)if(grid.material(x,y+h,z))issues.push('A stair has less than three blocks of headroom.');
   }
   for(const r of plan.rooms){
+    if(r.kind==='court')continue;
     const ports:Point[]=[];
     for(const o of plan.openings.filter(o=>o.type!=='window'&&o.roomIds.includes(r.id))){
       const near=o.axis==='x'?{x:o.x+1,z:o.z}:{x:o.x,z:o.z+1},far=o.axis==='x'?{x:o.x-2,z:o.z}:{x:o.x,z:o.z-2};

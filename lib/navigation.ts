@@ -1,10 +1,10 @@
 import { type Navigation, type Plan, type Room, type RoomKind, type Transit } from './model.ts';
 
 /** Rooms a household may cross to reach somewhere else. Everything else is a destination, not a route. */
-export const CIRCULATION_KINDS:readonly RoomKind[]=['circulation','stairs','gallery','hall'];
+export const CIRCULATION_KINDS:readonly RoomKind[]=['circulation','stairs','gallery','hall','court'];
 export const isCirculation=(r:Room)=>CIRCULATION_KINDS.includes(r.kind);
 /** How private a room is. A route forced through a steward's office is a compromise; a bedchamber is not. */
-export const ROOM_PRIVACY:Record<RoomKind,number>={circulation:0,stairs:0,hall:1,gallery:1,sacred:2,study:3,service:3,storage:4,bedroom:5};
+export const ROOM_PRIVACY:Record<RoomKind,number>={court:0,circulation:0,stairs:0,hall:1,gallery:1,sacred:2,study:3,service:3,storage:4,bedroom:5};
 
 export type AccessGraph={adjacency:Map<string,string[]>;depth:Map<string,number>;entry:string|undefined;unreachable:string[]};
 

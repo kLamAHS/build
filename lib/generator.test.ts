@@ -295,3 +295,38 @@ void test('a defended enclosure is a building: wall mass, a gatehouse, and a yar
   const fittings=new Set(hall.furniture.map(f=>f.type));
   assert.ok(fittings.has('dais')&&fittings.has('hearth')&&fittings.has('table'),'the hall has no dais, hearth or table');
 });
+void test('the courtyard castle is organised by its site: gate, court, hall, services, private side',()=>{
+  // The specification's reference composition: a southern gatehouse opens into a usable central court; the
+  // hall occupies the northern range with its service end toward the kitchen and its high end toward the
+  // private accommodation; the chapel is reachable without traversing private rooms.
+  for(const size of [128,200,320,480])for(const floors of [2,4]){
+    const settings={...DEFAULT_SETTINGS,kind:'castle' as const,family:'courtyard-castle' as const,size,floors,seed:`QUAD-${floors}`};
+    const p=generatePlan(settings);
+    const tag=`${size}/${floors}`;
+    const court=p.rooms.find(r=>r.kind==='court');
+    assert.ok(court,`${tag}: there is no court`);
+    assert.ok(court!.bounds.w>=20&&court!.bounds.d>=20,`${tag}: the court is ${court!.bounds.w}x${court!.bounds.d}`);
+    // Every range fronts the yard: the court is what joins them, not a chain of rooms.
+    const onto=p.connections.filter(e=>e.includes(court!.id)).map(([a,b])=>p.rooms.find(r=>r.id===(a===court!.id?b:a))!);
+    assert.ok(onto.length>=3,`${tag}: only ${onto.length} rooms open onto the court`);
+    const gateRange=new Set(p.components.filter(c=>c.kind==='gatehouse').map(c=>c.id));
+    const oddity=onto.filter(r=>!isCirculation(r)&&!gateRange.has(r.componentId));
+    assert.deepEqual(oddity.map(r=>r.name),[],`${tag}: the court opens straight into ${oddity.map(r=>r.name).join(', ')}`);
+    // You arrive through the gatehouse, cross the court, and enter the hall through its screens.
+    const hall=p.rooms.find(r=>r.kind==='hall')!;
+    const walk=routeToRoom(p,hall.id).map(r=>r.name);
+    assert.ok(walk[0]?.startsWith('Gate'),`${tag}: the walk begins at ${walk[0]}`);
+    assert.ok(walk.includes('Inner court'),`${tag}: the hall is reached without crossing the court: ${walk.join(' -> ')}`);
+    assert.equal(walk[walk.length-2],'Screens passage',`${tag}: the hall is entered from ${walk[walk.length-2]}`);
+    // The chapel is reached without passing through anybody's chamber.
+    for(const chapel of p.rooms.filter(r=>r.kind==='sacred')){
+      const crossed=routeToRoom(p,chapel.id).slice(0,-1).filter(r=>!isCirculation(r));
+      assert.deepEqual(crossed.map(r=>r.name),[],`${tag}: the chapel is reached through ${crossed.map(r=>r.name).join(', ')}`);
+    }
+    assert.deepEqual(navigationReport(p).transits.map(t=>t.name),[],`${tag}: forced crossings`);
+  }
+  // A larger budget buys a larger quadrangle.
+  const small=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'courtyard-castle',size:128,floors:3,seed:'SCALE'});
+  const large=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'courtyard-castle',size:480,floors:3,seed:'SCALE'});
+  assert.ok(large.totalArea>small.totalArea*1.5,`480 blocks buys ${large.totalArea} against ${small.totalArea} for 128`);
+});

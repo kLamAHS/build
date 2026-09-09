@@ -110,7 +110,20 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     return add(kind,name,bounds,Math.max(1,Math.min(s.floors,storeys)),parent);
   }
   let hall:BuildingComponent,domestic:BuildingComponent|undefined,service:BuildingComponent|undefined;
-  if(family==='hall-house'){
+  let courtyard:BuildingComponent|undefined,gatehouse:BuildingComponent|undefined;
+  const quadrangle=family==='courtyard-castle'&&s.size>=128;
+  if(quadrangle){
+    const span=(share:number,low:number,high:number)=>Math.max(low,Math.min(high,Math.round(s.size*share)));
+    const courtW=span(.22,22,72),courtD=span(.24,22,76);
+    const hallD=Math.max(courtW+6,span(.26,26,80)),wing=span(.16,16,36),gateD=span(.13,14,30);
+    // Stage B: the court and the way in come first and everything else is set against them.
+    courtyard=add('court','Inner court',{x:0,z:0,w:courtW,d:courtD},1)!;
+    // Stage C: the hall closes the head of the court, its screens end opening onto the yard.
+    hall=add('hall','Great hall',{x:0,z:-hallD,w:courtW,d:hallD},1)!;
+    domestic=add('domestic','Solar wing',{x:-wing,z:-hallD,w:wing,d:hallD+courtD+gateD},s.floors);
+    service=add('service','Kitchen range',{x:courtW,z:-hallD,w:wing,d:hallD+courtD+gateD},Math.min(2,s.floors));
+    gatehouse=add('gatehouse','Gatehouse',{x:0,z:courtD,w:courtW,d:gateD},Math.min(2,s.floors));
+  }else if(family==='hall-house'){
     hall=add('hall','Hearth hall',{x:0,z:0,w:small?18:22,d:hallD},1)!;
     domestic=attach(hall,'domestic','Solar end','n',small?18:24,32,s.floors,0)!;
     service=attach(hall,'service','Service end','s',small?14:20,small?14:20,1,0);
@@ -142,10 +155,10 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       if(chapel){chapel.parentId=c.id;break outer;}
     }
   }
-  const porch=attach(hall,'gatehouse',s.kind==='castle'?'Inner gate':'Entrance porch','s',small?8:12,8,1,0);
+  const porch=quadrangle?gatehouse:attach(hall,'gatehouse',s.kind==='castle'?'Inner gate':'Entrance porch','s',small?8:12,8,1,0);
   // Seeded growth adds complete households and workshops, never a longer list of hall copies.
   const reference=s.seed==='HALL-CROSSWING'&&s.kind==='manor'&&family==='crosswing'&&s.size===128;
-  const extra=reference||small?0:Math.max(0,Math.floor((s.size-80)/24))+(family==='accumulated-estate'||family==='annex-house'?2:0);
+  const extra=reference||small||quadrangle?0:Math.max(0,Math.floor((s.size-80)/24))+(family==='accumulated-estate'||family==='annex-house'?2:0);
   for(let n=0;n<extra;n++){
     const kind:ComponentKind=pick(s.kind==='castle'?['tower','domestic','workshop','lodging']:s.kind==='house'?['workshop','domestic','service']:['domestic','lodging','workshop','service']);
     for(let k=0;k<32;k++){
@@ -317,7 +330,16 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       }
       continue;
     }
-    if(c.kind==='gatehouse') {room(c,c.name,'circulation',b,0,6);continue;}
+    if(c.kind==='court'){room(c,c.name,'court',b,0,0);continue;}
+    if(c.kind==='gatehouse'){
+      const guard=Math.floor((b.w-6)/2);
+      if(quadrangle&&guard>=MIN_ROOM&&b.d>=8){
+        room(c,'Gate passage','circulation',{x:b.x+guard,z:b.z,w:b.w-2*guard,d:b.d},0,6);
+        room(c,'Gate guard','service',{x:b.x,z:b.z,w:guard,d:b.d},0,6);
+        room(c,'Porter’s lodge','service',{x:b.x+b.w-guard,z:b.z,w:guard,d:b.d},0,6);
+      }else room(c,c.name,'circulation',b,0,6);
+      continue;
+    }
     if(c.kind==='chapel') {
       // An antechapel on the wall the chapel shares with the house gives the household a threshold to
       // enter through, and keeps the sacred room a destination rather than a route to anywhere else.
@@ -719,13 +741,16 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     }
     else if(r.kind==='study'){addFurniture('desk',b.x+2,b.z+2,3,2);addFurniture('shelf',b.x+2,b.z+b.d-2,Math.max(2,b.w-4),1,2);}
     else if(r.kind==='storage'){addFurniture('shelf',b.x+2,b.z+2,Math.max(2,b.w-4),1,2);if(b.d>8)addFurniture('shelf',b.x+2,b.z+b.d-2,Math.max(2,b.w-4),1,2);}
+    else if(r.kind==='court'){
+      addFurniture('well',b.x+Math.floor(b.w/2)-1,b.z+Math.floor(b.d*.62),3,3,2);
+    }
     else if(r.kind==='sacred'){addFurniture('altar',b.x+5,b.z+3,Math.max(3,b.w-10),2);for(let z=b.z+8;z<b.z+b.d-3;z+=3){addFurniture('bench',b.x+2,z,4,1);addFurniture('bench',b.x+b.w-6,z,4,1);}}
   }
   for(const y of [...new Set(p.rooms.map(r=>r.floorY))].sort((a,b)=>a-b)){
     const voids=components.filter(c=>c.kind==='hall'&&y>0&&y<c.topY).map(c=>({id:`void-${c.id}-${y}`,name:'Open to hall below',bounds:c.bounds,polygon:c.polygon,holes:p.rooms.filter(r=>r.componentId===c.id&&r.floorY===y).map(r=>r.bounds),floorY:y,ceilingY:c.topY}));
     p.floors.push({index:y/6,name:y<0?'Cellar':y===0?'Ground floor':y===6?'First floor':y===12?'Second floor':`Floor ${y/6+1}`,elevation:y,rooms:p.rooms.filter(r=>r.floorY===y),voids,roofComponents:components.filter(c=>c.topY<=y).map(c=>c.id)});
   }
-  if(!small&&(s.kind==='castle'||s.courtyard||['courtyard-manor','palace','double-ward'].includes(family))){
+  if(!small&&!quadrangle&&(s.kind==='castle'||s.courtyard||['courtyard-manor','palace','double-ward'].includes(family))){
     const x=Math.min(...components.map(c=>c.bounds.x))-10,z=Math.min(...components.map(c=>c.bounds.z))-10,right=Math.max(...components.map(c=>c.bounds.x+c.bounds.w))+10,bottom=Math.max(...components.map(c=>c.bounds.z+c.bounds.d))+(family==='keep-bailey'?30:14);
     const thickness=s.kind==='castle'?3:2;
     const gate={x:p.entry.x,z:bottom};
@@ -778,6 +803,7 @@ function buildGeometry(p:Plan){
     for(let i=0;i<polygon.length;i++){const a=polygon[i],b=polygon[(i+1)%polygon.length],steps=Math.max(Math.abs(b.x-a.x),Math.abs(b.z-a.z));for(let j=0;j<=steps;j++){const t=steps?j/steps:0;box({x:Math.round(a.x+(b.x-a.x)*t),z:Math.round(a.z+(b.z-a.z)*t),w:1,d:1},y,h,material,kind,id);}}
   };
   for(const c of p.components){
+    if(c.kind==='court')continue;
     const b=c.bounds;
     polygonFill(c.polygon,c.baseY-1,1,1,'support',c.id);
     if(c.kind==='hall'||c.kind==='tower')outline(c.polygon,c.baseY,c.topY-c.baseY,1,'wall',c.id);
@@ -802,8 +828,9 @@ function buildGeometry(p:Plan){
     }
   }
   // Remove encroaching roofs where ranges meet taller volumes before placing partitions.
-  for(const r of p.rooms)polygonFill(clipPolygon(r.polygon,interior(r.bounds)),r.floorY+1,r.ceilingY-r.floorY-1,0,'air',r.componentId);
+  for(const r of p.rooms)if(r.kind!=='court')polygonFill(clipPolygon(r.polygon,interior(r.bounds)),r.floorY+1,r.ceilingY-r.floorY-1,0,'air',r.componentId);
   for(const r of p.rooms){
+    if(r.kind==='court'){polygonFill(r.polygon,-1,1,6,'ground',r.componentId);continue;}
     polygonFill(r.polygon,r.floorY,1,r.floorY<0?1:2,'floor',r.componentId);
     const c=p.components.find(c=>c.id===r.componentId)!;
     if(r.kind==='gallery'){
@@ -843,7 +870,7 @@ function buildGeometry(p:Plan){
     for(let w=-1;w<=o.width;w++)doorCells.add(`${o.x+(o.axis==='z'?w:0)},${o.z+(o.axis==='x'?w:0)}`);
   }
   for(const r of p.rooms){
-    if(r.floorY<0||r.kind==='stairs')continue;
+    if(r.floorY<0||r.kind==='stairs'||r.kind==='court')continue;
     for(const axis of ['x','z'] as const)for(const high of [false,true]){
       const b=r.bounds,fixed=axis==='x'?b.x+(high?b.w:0):b.z+(high?b.d:0),start=axis==='x'?b.z:b.x,len=axis==='x'?b.d:b.w;
       // A wall too short for the seven-block rhythm still takes a single window on its centre line.

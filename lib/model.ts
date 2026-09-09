@@ -1,10 +1,10 @@
 export type BuildKind='castle'|'manor'|'house';
-export type Family='auto'|'crosswing'|'tower-residence'|'courtyard-manor'|'accumulated-estate'|'keep-bailey'|'tower-cluster'|'palace'|'double-ward'|'hall-house'|'merchant-house'|'annex-house';
+export type Family='auto'|'crosswing'|'tower-residence'|'courtyard-manor'|'accumulated-estate'|'keep-bailey'|'tower-cluster'|'palace'|'double-ward'|'courtyard-castle'|'hall-house'|'merchant-house'|'annex-house';
 export type Settings={kind:BuildKind;family:Family;size:number;floors:number;organic:number;courtyard:boolean;chapel:boolean;garden:boolean;cellar:boolean;seed:string};
 export type Point={x:number;z:number};
 export type Rect=Point & {w:number;d:number};
-export type RoomKind='hall'|'bedroom'|'service'|'sacred'|'storage'|'study'|'circulation'|'stairs'|'gallery';
-export type ComponentKind='hall'|'domestic'|'service'|'tower'|'chapel'|'gatehouse'|'workshop'|'lodging';
+export type RoomKind='hall'|'bedroom'|'service'|'sacred'|'storage'|'study'|'circulation'|'stairs'|'gallery'|'court';
+export type ComponentKind='hall'|'domestic'|'service'|'tower'|'chapel'|'gatehouse'|'workshop'|'lodging'|'court';
 export type Furniture=Rect & {y:number;h:number;type:'table'|'bench'|'bed'|'shelf'|'hearth'|'desk'|'altar'|'oven'|'well'|'dais';material:number};
 export type Room={id:string;name:string;kind:RoomKind;componentId:string;suiteId?:string;bounds:Rect;polygon:Point[];holes:Rect[];floorY:number;ceilingY:number;area:number;description:string;furniture:Furniture[]};
 /** Rooms that belong to one occupant and are entered as a set: a chamber with its own wardrobe or garderobe. */
@@ -28,12 +28,12 @@ export type BuildingPlanV2=Plan;
 export type GenerationResult={ok:true;plan:Plan}|{ok:false;error:string};
 export const FAMILIES:Record<BuildKind,{id:Family;name:string;description:string}[]>={
  manor:[{id:'crosswing',name:'Hall & crosswings',description:'A tall hall between domestic and service ranges.'},{id:'tower-residence',name:'Tower residence',description:'A residential tower with a hall and lower annexes.'},{id:'courtyard-manor',name:'Courtyard manor',description:'A rich residence grown around an intimate court.'},{id:'accumulated-estate',name:'Accumulated estate',description:'Connected households, halls and successive additions.'}],
- castle:[{id:'keep-bailey',name:'Keep & bailey',description:'A dominant keep, domestic buildings and a defended yard.'},{id:'tower-cluster',name:'Clustered towers',description:'Unequal towers connected by residential ranges.'},{id:'palace',name:'Courtyard palace',description:'A grand hall, apartments and a chapel around a court.'},{id:'double-ward',name:'Inner & outer wards',description:'Two linked compounds with separate gatehouses.'}],
+ castle:[{id:'courtyard-castle',name:'Courtyard castle',description:'Ranges set round a central court, entered through a gatehouse.'},{id:'keep-bailey',name:'Keep & bailey',description:'A dominant keep, domestic buildings and a defended yard.'},{id:'tower-cluster',name:'Clustered towers',description:'Unequal towers connected by residential ranges.'},{id:'palace',name:'Courtyard palace',description:'A grand hall, apartments and a chapel around a court.'},{id:'double-ward',name:'Inner & outer wards',description:'Two linked compounds with separate gatehouses.'}],
  house:[{id:'hall-house',name:'Hall house',description:'A hearth hall, service end and private chambers.'},{id:'merchant-house',name:'Merchant house',description:'A workshop beneath private rooms and a jettied upper storey.'},{id:'annex-house',name:'Expanded house',description:'An older house extended with workshops and smaller annexes.'}]
 };
 export const DEFAULT_SETTINGS:Settings={kind:'manor',family:'crosswing',size:128,floors:3,organic:65,courtyard:false,chapel:true,garden:true,cellar:true,seed:'HALL-CROSSWING'};
-export const ROOM_COLORS:Record<RoomKind,string>={hall:'#e9d8b4',bedroom:'#d9e1d0',service:'#e6cbb4',sacred:'#ded2e7',storage:'#dcd6c5',study:'#cadfdd',circulation:'#ede6d5',stairs:'#cbd1be',gallery:'#e2d8c4'};
-export const ROOM_GROUPS:Record<RoomKind,string>={hall:'Gathering',bedroom:'Private chambers',service:'Service',sacred:'Chapel',storage:'Storage',study:'Study',circulation:'Circulation',stairs:'Stairway',gallery:'Open gallery'};
+export const ROOM_COLORS:Record<RoomKind,string>={hall:'#e9d8b4',bedroom:'#d9e1d0',service:'#e6cbb4',sacred:'#ded2e7',storage:'#dcd6c5',study:'#cadfdd',circulation:'#ede6d5',stairs:'#cbd1be',gallery:'#e2d8c4',court:'#dfd9c2'};
+export const ROOM_GROUPS:Record<RoomKind,string>={hall:'Gathering',bedroom:'Private chambers',service:'Service',sacred:'Chapel',storage:'Storage',study:'Study',circulation:'Circulation',stairs:'Stairway',gallery:'Open gallery',court:'Open court'};
 export const MATERIALS=[{id:0,name:'Air',color:'#ffffff'},{id:1,name:'Masonry',color:'#969a8d'},{id:2,name:'Timber',color:'#987348'},{id:3,name:'Slate roof',color:'#485c62'},{id:4,name:'Glass',color:'#aacace'},{id:5,name:'Plaster',color:'#e4d7b9'},{id:6,name:'Paving',color:'#bbad8e'},{id:7,name:'Garden',color:'#789263'},{id:8,name:'Hearth',color:'#65544a'},{id:9,name:'Furnishings',color:'#b89c69'}];
 export const rectPolygon=(r:Rect):Point[]=>[{x:r.x,z:r.z},{x:r.x+r.w,z:r.z},{x:r.x+r.w,z:r.z+r.d},{x:r.x,z:r.z+r.d}];
 export function insidePolygon(x:number,z:number,p:Point[]){let inside=false;for(let i=0,j=p.length-1;i<p.length;j=i++){const a=p[i],b=p[j];if((a.z>z)!==(b.z>z)&&x<(b.x-a.x)*(z-a.z)/(b.z-a.z)+a.x)inside=!inside;}return inside;}
