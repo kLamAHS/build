@@ -282,7 +282,8 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       };
       // Both neighbours run this same test against the same passage positions, so when a flank is needed
       // each of them builds one and the two meet along the wall they share.
-      const needsFlank=(strip:Rect,wall:'e'|'w')=>strip.d>=MIN_ROOM&&js.some(j=>j.side===wall&&!passagesMeet(j)&&Math.min(j.hi,strip.z+strip.d)-Math.max(j.lo,strip.z)>=6);
+      const chamfered=c.polygon.length>4;
+      const needsFlank=(strip:Rect,wall:'e'|'w')=>!chamfered&&strip.d>=MIN_ROOM&&js.some(j=>j.side===wall&&!passagesMeet(j)&&Math.min(j.hi,strip.z+strip.d)-Math.max(j.lo,strip.z)>=6);
       // The stair hall already holds the east flank of the south range whenever there is one.
       const flankWalls=(strip:Rect,walls:('e'|'w')[])=>{
         let area=strip;const halls:Rect[]=[];

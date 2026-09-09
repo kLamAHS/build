@@ -134,3 +134,16 @@ test('every family and size walks well: no forced crossings, real alternative ro
   const mean=reports.reduce((n,r)=>n+r.score,0)/reports.length;
   assert.ok(mean>=80,`mean navigability ${mean.toFixed(1)} is below the 80 this generator is expected to hold`);
 });
+test('every family builds across the size and storey range, including chamfered towers',()=>{
+  // A passage hugging a tower's wall pinched below two walkable blocks where the chamfer cuts the corner,
+  // which the voxel audit rejected and which no reroll could recover.
+  const failures:string[]=[];
+  for(const kind of ['house','manor','castle'] as const)for(const family of FAMILIES[kind])
+  for(const size of [64,160,320,512])for(const floors of [1,4,8]){
+    const settings={...DEFAULT_SETTINGS,kind,family:family.id,size,floors,seed:`BUILDABLE-${floors}`};
+    const result=tryGenerate(settings);
+    if(!result.ok)failures.push(`${kind}/${family.id}/${size}/${floors}: ${result.error}`);
+    else assert.equal(result.plan.navigation.unreachable.length,0,`${kind}/${family.id}/${size}/${floors}: unreachable rooms`);
+  }
+  assert.deepEqual(failures,[]);
+});
