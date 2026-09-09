@@ -18,6 +18,49 @@ export function validateSettings(input:Settings):Settings {
 const names=['Alder','Raven','Briar','Oak','Ash','Hearth','Rowan','Thorn','Grey','Fox'];
 const sectors=['North','East','South','West','Garden','Orchard','Court','Meadow','River','Old'];
 const interior=(r:Rect):Rect=>({x:r.x+1,z:r.z+1,w:r.w-1,d:r.d-1});
+export type RoomShape='rect'|'canted'|'apse'|'octagon'|'ell';
+/** Corners cut back at forty-five degrees. The straight runs between them still carry the doors. */
+function cantedPolygon(b:Rect,cut:number):Point[] {
+  const c=Math.max(1,Math.min(cut,Math.floor((b.w-4)/2),Math.floor((b.d-4)/2)));
+  if(c<1)return rectPolygon(b);
+  return [{x:b.x+c,z:b.z},{x:b.x+b.w-c,z:b.z},{x:b.x+b.w,z:b.z+c},{x:b.x+b.w,z:b.z+b.d-c},
+    {x:b.x+b.w-c,z:b.z+b.d},{x:b.x+c,z:b.z+b.d},{x:b.x,z:b.z+b.d-c},{x:b.x,z:b.z+c}];
+}
+/** One end swept into a stepped half-round, the way a chapel closes on its altar. */
+function apsidalPolygon(b:Rect,side:'n'|'s'|'e'|'w'):Point[] {
+  const across=side==='e'||side==='w'?b.d:b.w,depth=Math.min(Math.floor(across/2),Math.floor((side==='e'||side==='w'?b.w:b.d)/2));
+  if(depth<2||across<6)return rectPolygon(b);
+  const radius=depth,steps=Math.max(4,radius*2);
+  const arc:Point[]=[];
+  for(let i=0;i<=steps;i++){
+    const angle=Math.PI*(i/steps)-Math.PI/2,along=Math.round(Math.sin(angle)*(across/2)),out=Math.round(Math.cos(angle)*radius);
+    const midAlong=(side==='e'||side==='w'?b.z+b.d/2:b.x+b.w/2);
+    if(side==='e')arc.push({x:b.x+b.w-radius+out,z:Math.round(midAlong+along)});
+    else if(side==='w')arc.push({x:b.x+radius-out,z:Math.round(midAlong-along)});
+    else if(side==='s')arc.push({x:Math.round(midAlong-along),z:b.z+b.d-radius+out});
+    else arc.push({x:Math.round(midAlong+along),z:b.z+radius-out});
+  }
+  if(side==='e')return [{x:b.x,z:b.z},{x:b.x+b.w-radius,z:b.z},...arc,{x:b.x+b.w-radius,z:b.z+b.d},{x:b.x,z:b.z+b.d}];
+  if(side==='w')return [{x:b.x+radius,z:b.z+b.d},{x:b.x+b.w,z:b.z+b.d},{x:b.x+b.w,z:b.z},{x:b.x+radius,z:b.z},...arc];
+  if(side==='s')return [{x:b.x,z:b.z},{x:b.x+b.w,z:b.z},{x:b.x+b.w,z:b.z+b.d-radius},...arc,{x:b.x,z:b.z+b.d-radius}];
+  return [{x:b.x+b.w,z:b.z+b.d},{x:b.x,z:b.z+b.d},{x:b.x,z:b.z+radius},...arc,{x:b.x+b.w,z:b.z+radius}];
+}
+/** A rectangle with one corner given over to a closet, which keeps its own frontage on the passage. */
+function ellPolygon(b:Rect,notch:Rect):Point[] {
+  const west=notch.x===b.x,north=notch.z===b.z;
+  const nx=west?b.x+notch.w:notch.x,nz=north?b.z+notch.d:notch.z;
+  if(west&&north)return [{x:nx,z:b.z},{x:b.x+b.w,z:b.z},{x:b.x+b.w,z:b.z+b.d},{x:b.x,z:b.z+b.d},{x:b.x,z:nz},{x:nx,z:nz}];
+  if(!west&&north)return [{x:b.x,z:b.z},{x:nx,z:b.z},{x:nx,z:nz},{x:b.x+b.w,z:nz},{x:b.x+b.w,z:b.z+b.d},{x:b.x,z:b.z+b.d}];
+  if(west)return [{x:b.x,z:b.z},{x:b.x+b.w,z:b.z},{x:b.x+b.w,z:b.z+b.d},{x:nx,z:b.z+b.d},{x:nx,z:nz},{x:b.x,z:nz}];
+  return [{x:b.x,z:b.z},{x:b.x+b.w,z:b.z},{x:b.x+b.w,z:nz},{x:nx,z:nz},{x:nx,z:b.z+b.d},{x:b.x,z:b.z+b.d}];
+}
+function shapePolygon(b:Rect,shape:RoomShape,side:'n'|'s'|'e'|'w',notch?:Rect):Point[] {
+  if(shape==='ell'&&notch)return ellPolygon(b,notch);
+  if(shape==='canted')return cantedPolygon(b,Math.max(2,Math.floor(Math.min(b.w,b.d)/6)));
+  if(shape==='octagon')return cantedPolygon(b,Math.floor(Math.min(b.w,b.d)/3));
+  if(shape==='apse')return apsidalPolygon(b,side);
+  return rectPolygon(b);
+}
 /** Which side of `a` its wall shares with `b`, or undefined when the two do not touch. */
 function sharedSide(a:Rect,b:Rect):'n'|'s'|'e'|'w'|undefined {
   const overlapZ=Math.min(a.z+a.d,b.z+b.d)-Math.max(a.z,b.z),overlapX=Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x);
@@ -111,9 +154,9 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   if(family==='double-ward'&&!small){const end=[...components].sort((a,b)=>b.bounds.x+b.bounds.w-a.bounds.x-a.bounds.w)[0];attach(end,'gatehouse','Outer ward gate','e',16,14,1,0);}
   // Compact budgets keep the same minimum stair and room sizes; optional ranges are omitted.
   const p:Plan={schemaVersion:2,generatorVersion:'2.0',name:reference?'Alderhall Manor':`${pick(names)}${pick(['wick','mere','ford','haven'])} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,family,components,rooms:[],floors:[],openings:[],stairs:[],chimneys:[],courts:[],routes:[],blocks:[],walls:[],slabs:[],roofs:[],supports:[],bounds:{x:0,z:0,w:0,d:0},minY:s.cellar?-6:0,maxY:0,width:0,depth:0,totalArea:0,entry:{x:0,z:0},connections:[],validation:{valid:true,issues:[]},navigation:{maxDepth:0,meanDepth:0,loops:0,unreachable:[],transits:[],strandedRooms:0,score:0},signature:''};
-  function room(c:BuildingComponent,name:string,kind:RoomKind,bounds:Rect,y:number,ceiling=y+6){
+  function room(c:BuildingComponent,name:string,kind:RoomKind,bounds:Rect,y:number,ceiling=y+6,shape:RoomShape='rect',shapeSide:'n'|'s'|'e'|'w'='e',notch?:Rect){
     const envelope=c.kind==='tower'?c.polygon:rectPolygon(componentFootprint(c,y,family));
-    const polygon=clipPolygon(envelope,bounds);
+    const polygon=shape==='rect'?clipPolygon(envelope,bounds):clipPolygon(shapePolygon(bounds,shape,shapeSide,notch),componentFootprint(c,y,family));
     const r:Room={id:`r${p.rooms.length}`,name,kind,componentId:c.id,bounds,polygon,holes:[],floorY:y,ceilingY:ceiling,area:(bounds.w-1)*(bounds.d-1),description:'',furniture:[]};p.rooms.push(r);return r;
   }
   // Circulation has to reach the walls where ranges meet. Where it does not, the only way to join two wings
@@ -252,9 +295,10 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       if(side&&along>=depth+8){
         const ante:Rect=side==='s'?{...b,z:b.z+b.d-depth,d:depth}:side==='n'?{...b,d:depth}:side==='e'?{...b,x:b.x+b.w-depth,w:depth}:{...b,w:depth};
         const nave:Rect=side==='s'?{...b,d:b.d-depth}:side==='n'?{...b,z:b.z+depth,d:b.d-depth}:side==='e'?{...b,w:b.w-depth}:{...b,x:b.x+depth,w:b.w-depth};
+        const facing:Record<'n'|'s'|'e'|'w','n'|'s'|'e'|'w'>={n:'s',s:'n',e:'w',w:'e'};
         room(c,'Antechapel','circulation',ante,0,6);
-        room(c,'Chapel','sacred',nave,0,6);
-      }else room(c,'Chapel','sacred',b,0,6);
+        room(c,'Chapel','sacred',nave,0,6,'apse',facing[side]);
+      }else room(c,'Chapel','sacred',b,0,6,'apse','n');
       continue;
     }
     const hasStairs=c.storeys>1||(s.cellar&&(c===domestic||c===service)&&b.w>=18&&b.d>=30);
@@ -336,15 +380,34 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       const gabled=f===c.storeys-1&&f>1;
       // The largest area left is the room the range is for, and it is kept whole. The rest is cut into a
       // cluster of lesser rooms, so a kitchen reads as a kitchen and a larder reads as a larder.
-      const areas=[...north.slots,...south.slots].filter(a=>a.w>=MIN_ROOM&&a.d>=MIN_ROOM)
-        .sort((m,n)=>n.w*n.d-m.w*m.d||m.x-n.x||m.z-n.z);
-      const slots:Rect[]=[];
+      const areas=[...north.slots.map(rect=>({rect,passage:'s' as const})),...south.slots.map(rect=>({rect,passage:'n' as const}))]
+        .filter(a=>a.rect.w>=MIN_ROOM&&a.rect.d>=MIN_ROOM)
+        .sort((m,n)=>n.rect.w*n.rect.d-m.rect.w*m.rect.d||m.rect.x-n.rect.x||m.rect.z-n.rect.z);
+      const slots:{rect:Rect;passage:'n'|'s';principal:boolean}[]=[];
       areas.forEach((area,i)=>{
-        if(i===0){slots.push(area);return;}
-        const count=Math.max(1,Math.min(3,Math.floor(area.w/9)));
-        slots.push(...divide(area,Array.from({length:count},(_,k)=>k===0?2:1)));
+        if(i===0){slots.push({...area,principal:true});return;}
+        const count=Math.max(1,Math.min(3,Math.floor(area.rect.w/9)));
+        for(const rect of divide(area.rect,Array.from({length:count},(_,k)=>k===0?2:1)))slots.push({rect,passage:area.passage,principal:false});
       });
-      slots.forEach((r,i)=>{const [name,kind]=program[Math.min(i,program.length-1)];room(c,name,kind,r,y,gabled?y+4:y+6);});
+      const head=slots[0];
+      // A closet in the angle of the principal room, with its own door onto the passage the room fronts.
+      const closetDepth=5,closetWidth=head?Math.min(7,Math.floor(head.rect.w/3)):0;
+      const roomy=head&&head.rect.w>=closetWidth+MIN_ROOM*2&&head.rect.d>=closetDepth+MIN_ROOM+2&&c.kind!=='tower';
+      const notch:Rect|undefined=roomy?{
+        x:f%2===0?head.rect.x:head.rect.x+head.rect.w-closetWidth,
+        z:head.passage==='s'?head.rect.z+head.rect.d-closetDepth:head.rect.z,
+        w:closetWidth,d:closetDepth,
+      }:undefined;
+      slots.forEach((slot,i)=>{
+        const [name,kind]=program[Math.min(i,program.length-1)];
+        const crown=c.kind==='tower'&&f>0&&slot.principal&&slot.rect.w>=11&&slot.rect.d>=11;
+        const shape:RoomShape=crown?'octagon':slot.principal&&notch?'ell':slot.principal&&slot.rect.w>=14&&slot.rect.d>=14?'canted':'rect';
+        room(c,name,kind,slot.rect,y,gabled?y+4:y+6,shape,'e',notch);
+      });
+      if(notch){
+        const [name,kind]=program[program.length-1];
+        room(c,name,kind,notch,y,gabled?y+4:y+6);
+      }
       if(hasStairs){const r=room(c,'Stair hall','stairs',stairRect,y);stairRooms.push(r);}
       else room(c,c.kind==='service'?'Bread oven':'Household store',c.kind==='service'?'service':'storage',stairRect,y);
     }
