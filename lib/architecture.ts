@@ -134,8 +134,8 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   }
   /** Both neighbours derive the same position from the shared span, so their passages meet in the wall. */
   const spanCentre=(lo:number,hi:number,width:number)=>lo+Math.floor((hi-lo-width)/2);
-  /** Split a strip in two, running a passage out to a shared wall when one of these junctions needs it. */
-  function spurSplit(strip:Rect,spans:{lo:number;hi:number}[],fallback:number):{slots:Rect[];spur?:Rect}{
+  /** The areas a strip is left with once a passage has been run out to a shared wall through it. */
+  function spurSplit(strip:Rect,spans:{lo:number;hi:number}[]):{slots:Rect[];spur?:Rect}{
     if(strip.w<MIN_ROOM||strip.d<MIN_ROOM)return {slots:[]};
     if(strip.w>=MIN_ROOM*2+SPUR){
       const lo=strip.x+MIN_ROOM,hi=strip.x+strip.w-MIN_ROOM-SPUR;
@@ -144,9 +144,23 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
         if(at>=lo&&at<=hi)return {slots:[{...strip,w:at-strip.x},{...strip,x:at+SPUR,w:strip.x+strip.w-at-SPUR}],spur:{...strip,x:at,w:SPUR}};
       }
     }
-    if(strip.w<MIN_ROOM*2)return {slots:[strip]};
-    const at=Math.max(strip.x+MIN_ROOM,Math.min(fallback,strip.x+strip.w-MIN_ROOM));
-    return {slots:[{...strip,w:at-strip.x},{...strip,x:at,w:strip.x+strip.w-at}]};
+    return {slots:[strip]};
+  }
+  /**
+   * Cut an area into rooms across its width in the given proportions. A range is not a grid of equal boxes:
+   * it has one room that matters and a cluster of small ones, and this is what makes that readable in plan.
+   */
+  function divide(area:Rect,weights:number[]):Rect[]{
+    if(area.w<MIN_ROOM||area.d<MIN_ROOM)return [];
+    const parts=weights.slice(0,Math.max(1,Math.floor(area.w/MIN_ROOM)));
+    const total=parts.reduce((a,b)=>a+b,0),out:Rect[]=[];
+    let at=area.x,left=area.w;
+    parts.forEach((weight,i)=>{
+      const behind=(parts.length-i-1)*MIN_ROOM;
+      const w=i===parts.length-1?left:Math.max(MIN_ROOM,Math.min(Math.round(area.w*weight/total),left-behind));
+      out.push({...area,x:at,w});at+=w;left-=w;
+    });
+    return out;
   }
   // Where every range's cross passage sits, decided for the whole composition before any room is cut.
   // Two adjoining ranges that each centre their own passage independently miss each other in the shared
@@ -302,8 +316,9 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
         return {area,halls};
       };
       const northFlank=flankWalls(northStrip,['w','e']),southFlank=flankWalls(southStrip,hasStairs?['w']:['w','e']);
-      const north=spurSplit(northFlank.area,js.filter(j=>j.side==='n'),cx);
-      const south=spurSplit(southFlank.area,js.filter(j=>j.side==='s'),southFlank.area.x+Math.floor(southFlank.area.w*.5));
+      const north=spurSplit(northFlank.area,js.filter(j=>j.side==='n'));
+      const south=spurSplit(southFlank.area,js.filter(j=>j.side==='s'));
+      void cx;
       // A passage running out to the shared wall, so the neighbouring range is entered from circulation.
       for(const hall of [...northFlank.halls,...southFlank.halls])room(c,'Passage','circulation',hall,y);
       if(north.spur)room(c,'Passage','circulation',north.spur,y);
@@ -318,9 +333,17 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       else if(c.kind==='tower'&&f>0)program=[[f===c.storeys-1?'Tower chamber':'Solar chamber','bedroom'],['Antechamber','study'],['Wardrobe','storage'],['Guest chamber','bedroom'],['Linen room','storage']];
       else if(f===c.storeys-1&&f>1)program=[['Gabled bedchamber','bedroom'],['Wardrobe & study','study'],['Bedchamber','bedroom'],['Linen room','storage'],['Private study','study']];
       else program=[['Bedchamber','bedroom'],['Guest chamber','bedroom'],['Linen room','storage'],['Nurse’s chamber','bedroom'],['Wardrobe','storage']];
-      // A tower head and a gabled attic read as one grand room when no passage has to cross them.
-      const gabled=f===c.storeys-1&&f>1,merge=!north.spur&&north.slots.length>1&&((c.kind==='tower'&&f>0)||gabled);
-      const slots=merge?[northFlank.area,...south.slots]:[...north.slots,...south.slots];
+      const gabled=f===c.storeys-1&&f>1;
+      // The largest area left is the room the range is for, and it is kept whole. The rest is cut into a
+      // cluster of lesser rooms, so a kitchen reads as a kitchen and a larder reads as a larder.
+      const areas=[...north.slots,...south.slots].filter(a=>a.w>=MIN_ROOM&&a.d>=MIN_ROOM)
+        .sort((m,n)=>n.w*n.d-m.w*m.d||m.x-n.x||m.z-n.z);
+      const slots:Rect[]=[];
+      areas.forEach((area,i)=>{
+        if(i===0){slots.push(area);return;}
+        const count=Math.max(1,Math.min(3,Math.floor(area.w/9)));
+        slots.push(...divide(area,Array.from({length:count},(_,k)=>k===0?2:1)));
+      });
       slots.forEach((r,i)=>{const [name,kind]=program[Math.min(i,program.length-1)];room(c,name,kind,r,y,gabled?y+4:y+6);});
       if(hasStairs){const r=room(c,'Stair hall','stairs',stairRect,y);stairRooms.push(r);}
       else room(c,c.kind==='service'?'Bread oven':'Household store',c.kind==='service'?'service':'storage',stairRect,y);
@@ -405,6 +428,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   const intrusion=(e:typeof candidates[number])=>(isCirculation(e.a)?0:ROOM_PRIVACY[e.a.kind])+(isCirculation(e.b)?0:ROOM_PRIVACY[e.b.kind]);
   const byIntrusion=(m:typeof candidates[number],n:typeof candidates[number])=>intrusion(m)-intrusion(n)||wide(m,n);
   for(const only of [discreet,proper,open])for(const edge of candidates.filter(only).sort(byIntrusion)){
+    if(only===discreet&&crowds(edge))continue;
     if(find(edge.a.id)!==find(edge.b.id))cut(edge);
   }
   // 4. Doors a designer would add between rooms that already have their own entrance: a kitchen into its
@@ -412,7 +436,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   const PAIRED:Record<string,string[]>={Kitchen:['Pantry & buttery','Scullery','Larder','Wet larder','Bread oven'],Solar:['Withdrawing room','Parlour'],Bedchamber:['Wardrobe','Wardrobe & study','Linen room'],'Gabled bedchamber':['Wardrobe & study'],Workshop:['Goods store','Tool store','Counting room'],Guardroom:['Armoury','Watch room'],'Tower chamber':['Wardrobe','Antechamber'],'Solar chamber':['Wardrobe','Antechamber']};
   const paired=(m:Room,n:Room)=>(PAIRED[m.name]??[]).includes(n.name)||(PAIRED[n.name]??[]).includes(m.name);
   for(const edge of candidates.filter(e=>discreet(e)&&paired(e.a,e.b)).sort(wide)){
-    if(toCirculation.get(edge.a.id)!&&toCirculation.get(edge.b.id)!)cut(edge);
+    if(!crowds(edge)&&toCirculation.get(edge.a.id)!&&toCirculation.get(edge.b.id)!)cut(edge);
   }
   // 5. Loop closure. A plan whose doors form a bare tree forces one route to everywhere; a real house
   //    lets you come back a different way. Extra passage-to-passage doors are added where the walk is longest.
@@ -449,7 +473,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       for(const [id,strands] of forced){
         const stranded=new Set(strands);
         const reaches=(e:typeof candidates[number])=>e.a.id!==id&&e.b.id!==id&&stranded.has(e.a.id)!==stranded.has(e.b.id);
-        const relief=candidates.filter(e=>discreet(e)&&reaches(e)).sort(byIntrusion)[0]
+        const relief=candidates.filter(e=>discreet(e)&&!crowds(e)&&reaches(e)).sort(byIntrusion)[0]
           ??candidates.filter(e=>proper(e)&&reaches(e)).sort(byIntrusion)[0]
           ??candidates.filter(e=>open(e)&&reaches(e)).sort(byIntrusion)[0];
         if(relief){cut(relief);relieved=true;}

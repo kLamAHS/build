@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { generatePlan, tryGenerate } from './architecture.ts';
 import { DEFAULT_SETTINGS, FAMILIES, insidePolygon, type Settings, type Plan } from './model.ts';
 import { voxelize, prepareMeshes, SparseBlocks } from './voxels.ts';
-import { accessGraph, transitViolations, isCirculation, routeToRoom, navigationReport } from './navigation.ts';
+import { accessGraph, transitViolations, isCirculation, routeToRoom, navigationReport, articulationPoints } from './navigation.ts';
 
 export const representatives:Settings[]=(['house','manor','castle'] as const).flatMap(kind=>[128,256].flatMap(size=>[0,1,2].map(i=>({...DEFAULT_SETTINGS,kind,size,seed:`REVIEW-${kind}-${size}-${i}`,family:FAMILIES[kind][i].id}))));
 const reference=generatePlan(DEFAULT_SETTINGS);
@@ -147,6 +147,20 @@ test('every family builds across the size and storey range, including chamfered 
   }
   assert.deepEqual(failures,[]);
 });
+/** Would closing one of this room's doors part the plan or force a household through somewhere private? */
+function loadBearing(p:Plan,roomId:string){
+  const doors=p.connections.filter(e=>e.includes(roomId));
+  return doors.some(([a,b])=>{
+    const adjacency=new Map(p.rooms.map(r=>[r.id,[] as string[]]));
+    for(const [m,n] of p.connections){if(m===a&&n===b)continue;adjacency.get(m)?.push(n);adjacency.get(n)?.push(m);}
+    const entry=p.openings.find(o=>o.type==='entrance')!.roomIds[0];
+    const seen=new Set([entry]),queue=[entry];
+    for(let i=0;i<queue.length;i++)for(const next of adjacency.get(queue[i])!)if(!seen.has(next)){seen.add(next);queue.push(next);}
+    if(seen.size<p.rooms.length)return true;
+    const byId=new Map(p.rooms.map(r=>[r.id,r]));
+    return [...articulationPoints({adjacency,depth:new Map(),entry,unreachable:[]}).keys()].some(id=>{const r=byId.get(id);return r&&!isCirculation(r);});
+  });
+}
 test('chambers are furnished, lit and private: a bed to sleep in and no second way through',()=>{
   // Regressions caught after the circulation work: a fixed 3x4 bed and a door clearance reaching seven
   // blocks through the wall left 27% of bedchambers empty, and extra doors turned 16% into shortcuts.
@@ -160,7 +174,7 @@ test('chambers are furnished, lit and private: a bed to sleep in and no second w
         bedrooms++;
         if(!room.furniture.some(f=>f.type==='bed'))bare++;
         const onto=p.connections.filter(e=>e.includes(room.id)).map(([a,b])=>byId.get(a===room.id?b:a)!).filter(isCirculation);
-        if(onto.length>1)shortcuts++;
+        if(onto.length>1&&!loadBearing(p,room.id))shortcuts++;
       }
       if(isCirculation(room)||room.floorY<0||lit.has(room.id))continue;
       windowless++;
@@ -171,6 +185,6 @@ test('chambers are furnished, lit and private: a bed to sleep in and no second w
     }
   }
   assert.ok(bare/bedrooms<=0.03,`${bare} of ${bedrooms} bedchambers have no bed`);
-  assert.equal(shortcuts,0,`${shortcuts} bedchambers have a second door onto circulation`);
+  assert.equal(shortcuts,0,`${shortcuts} bedchambers have a second door onto circulation that nothing needed`);
   assert.ok((windowless-landlocked)/Math.max(1,windowless)<=0.5,`${windowless-landlocked} of ${windowless} windowless chambers do have an outside wall`);
 });
