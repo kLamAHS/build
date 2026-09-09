@@ -152,12 +152,21 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   // Two adjoining ranges that each centre their own passage independently miss each other in the shared
   // wall by a block or two, and the only remaining way between them is a door through somebody's chamber.
   const bandOf=(c:BuildingComponent)=>c.bounds.d<28||c.bounds.w<18?5:BAND;
+  /** The hall's screens passage, and the gallery above it, sit at one end of the hall's flank. */
+  const screensZ=(c:BuildingComponent,y:number)=>{
+    const fo=componentFootprint(c,y,family);
+    return y===6&&family==='hall-house'?fo.z:fo.z+fo.d-5;
+  };
   const passageZ=new Map<string,number>();
   {
     const banded=(c:BuildingComponent)=>c.kind!=='hall'&&c.kind!=='gatehouse'&&c.kind!=='chapel';
     const top=Math.max(...components.map(c=>c.storeys));
     for(let f=-1;f<top;f++){
       const y=f*6,here=components.filter(c=>banded(c)&&y>=c.baseY&&f<c.storeys);
+      // The screens passage is where a household's service doors belong, so it anchors the alignment:
+      // a neighbouring range lines its cross passage up with it instead of opening into the hall body.
+      const anchors=y===0?components.filter(c=>c.kind==='hall'):[];
+      for(const c of anchors)passageZ.set(`${c.id}:${f}`,screensZ(c,y));
       const limits=(c:BuildingComponent)=>{
         const rb=componentFootprint(c,y,family),band=bandOf(c);
         return {rb,band,low:rb.z+MIN_ROOM,high:Math.min(rb.z+rb.d-MIN_ROOM-band,c.bounds.z+c.bounds.d-17)};
@@ -170,23 +179,26 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
         passageZ.set(`${c.id}:${f}`,high>=low?Math.max(low,Math.min(mid,high)):mid);
         void band;
       }
-      const links:{a:BuildingComponent;b:BuildingComponent;lo:number;hi:number}[]=[];
-      for(let i=0;i<here.length;i++)for(let j=i+1;j<here.length;j++){
-        const fa=componentFootprint(here[i],y,family),fb=componentFootprint(here[j],y,family),side=sharedSide(fa,fb);
+      const links:{a:BuildingComponent;b:BuildingComponent;lo:number;hi:number;anchored:boolean}[]=[];
+      const joinable=[...anchors,...here],isAnchor=(c:BuildingComponent)=>anchors.includes(c);
+      for(let i=0;i<joinable.length;i++)for(let j=i+1;j<joinable.length;j++){
+        const fa=componentFootprint(joinable[i],y,family),fb=componentFootprint(joinable[j],y,family),side=sharedSide(fa,fb);
         if(side!=='e'&&side!=='w')continue;
         const lo=Math.max(fa.z,fb.z),hi=Math.min(fa.z+fa.d,fb.z+fb.d);
-        if(hi-lo>=6)links.push({a:here[i],b:here[j],lo,hi});
+        if(hi-lo<6||(isAnchor(joinable[i])&&isAnchor(joinable[j])))continue;
+        links.push({a:joinable[i],b:joinable[j],lo,hi,anchored:isAnchor(joinable[i])||isAnchor(joinable[j])});
       }
-      // Widest shared wall first: the broadest junction is the one worth committing both passages to.
-      links.sort((m,n)=>(n.hi-n.lo)-(m.hi-m.lo)||m.a.id.localeCompare(n.a.id)||m.b.id.localeCompare(n.b.id));
-      const settled=new Set<string>();
+      // The screens passage first, then the widest shared wall: the broadest junction is the one worth
+      // committing both passages to.
+      links.sort((m,n)=>Number(n.anchored)-Number(m.anchored)||(n.hi-n.lo)-(m.hi-m.lo)||m.a.id.localeCompare(n.a.id)||m.b.id.localeCompare(n.b.id));
+      const settled=new Set(anchors.map(c=>`${c.id}:${f}`));
       for(const link of links){
         const ka=`${link.a.id}:${f}`,kb=`${link.b.id}:${f}`;
         if(settled.has(ka)&&settled.has(kb))continue;
         const width=Math.max(bandOf(link.a),bandOf(link.b));
         const at=settled.has(ka)?passageZ.get(ka)!:settled.has(kb)?passageZ.get(kb)!:spanCentre(link.lo,link.hi,width);
         if(Math.min(link.hi,at+width)-Math.max(link.lo,at)<4)continue;
-        const fits=(c:BuildingComponent)=>{const {low,high}=limits(c);return high>=low&&at>=low&&at<=high;};
+        const fits=(c:BuildingComponent)=>{if(isAnchor(c))return true;const {low,high}=limits(c);return high>=low&&at>=low&&at<=high;};
         if(!fits(link.a)||!fits(link.b))continue;
         passageZ.set(ka,at);passageZ.set(kb,at);settled.add(ka);settled.add(kb);
       }
@@ -197,7 +209,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     if(y<o.baseY||y>=o.topY)return undefined;
     const fo=componentFootprint(o,y,family);
     // A hall, a gatehouse and a chapel with its antechapel present circulation along their whole flank.
-    if(o.kind==='hall')return y===0||y===6?[fo.z,fo.z+fo.d]:undefined;
+    if(o.kind==='hall'){const at=screensZ(o,y);return y===0||y===6?[at,at+5]:undefined;}
     if(o.kind==='gatehouse'||o.kind==='chapel')return y===0?[fo.z,fo.z+fo.d]:undefined;
     const at=passageZ.get(`${o.id}:${y/6}`);
     return at===undefined?undefined:[at,at+bandOf(o)];
