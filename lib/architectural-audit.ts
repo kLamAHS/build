@@ -1,4 +1,4 @@
-import { insidePolygon, type Plan, type Room, type Point } from './model.ts';
+import { insidePolygon, type Plan, type Room, type Point, type RoomKind } from './model.ts';
 import { voxelize, type SparseBlocks } from './voxels.ts';
 
 /** Validate the constructed cells, not just the adjacency labels. */
@@ -11,11 +11,25 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
     for(let h=1;h<=3;h++)if(grid.material(x,y+h,z))issues.push('A stair has less than three blocks of headroom.');
   }
   for(const r of plan.rooms){
+    if(r.kind==='court')continue;
     const ports:Point[]=[];
-    for(const o of plan.openings.filter(o=>o.type!=='window'&&o.roomIds.includes(r.id))){const b=r.bounds;ports.push(o.axis==='x'?{x:o.x===b.x?o.x+1:o.x-2,z:o.z}:{x:o.x,z:o.z===b.z?o.z+1:o.z-2});}
+    for(const o of plan.openings.filter(o=>o.type!=='window'&&o.roomIds.includes(r.id))){
+      const near=o.axis==='x'?{x:o.x+1,z:o.z}:{x:o.x,z:o.z+1},far=o.axis==='x'?{x:o.x-2,z:o.z}:{x:o.x,z:o.z-2};
+      ports.push(insidePolygon(near.x+1,near.z+1,r.polygon)?near:far);
+    }
     for(const st of plan.stairs.filter(st=>st.roomIds.includes(r.id))){const l=st.landings[r.floorY===st.fromY?0:1];ports.push({x:l.x,z:l.z});}
     const reachable=roomRoutes(r,ports,grid);
     if(!reachable)issues.push(`${r.name} (${r.componentId}, Y ${r.floorY}) does not have a clear two-block route between its doors and landings.`);
+  }
+  // A minimum area alone is satisfied by a strip ninety blocks long, and a target with no ceiling lets a
+  // pantry absorb a whole wing. An ordinary room that has become either is a composition failure, not a
+  // room worth furnishing, so the candidate is rejected and another composition is tried.
+  const ORDINARY:RoomKind[]=['bedroom','study','service','storage'];
+  for(const r of plan.rooms){
+    if(!ORDINARY.includes(r.kind))continue;
+    const w=r.bounds.w-1,d=r.bounds.d-1,where=`${r.name} (${r.componentId}, Y ${r.floorY})`;
+    if(Math.max(w,d)>Math.min(w,d)*3.2)issues.push(`${where} is a ${w} by ${d} strip rather than a room.`);
+    if(w*d>760)issues.push(`${where} has swallowed ${w*d} blocks of its range.`);
   }
   for(const c of plan.chimneys)for(let y=c.fromY;y<c.toY;y++)if(grid.material(c.bounds.x,y,c.bounds.z)!==8)issues.push('A chimney stack is discontinuous.');
   return [...new Set(issues)];

@@ -8,7 +8,22 @@ export function preciseSvg(node:ReactNode):ReactNode {return Children.map(node,c
 const polygonPath=(p:Point[])=>p.length?`M${p.map(v=>`${v.x},${v.z}`).join('L')}Z`:'';
 const rectPath=(x:number,z:number,w:number,d:number)=>`M${x} ${z}h${w}v${d}h${-w}Z`;
 const lines=(name:string)=>{const words=name.split(' ');return name.length>14&&words.length>1?[words.slice(0,Math.ceil(words.length/2)).join(' '),words.slice(Math.ceil(words.length/2)).join(' ')]:[name];};
-function Furniture({room}:{room:Room}){return <g fill="#f6eedb" stroke="#857b66" strokeWidth=".14">{room.furniture.map((f,i)=><g key={i}><rect x={f.x} y={f.z} width={f.w} height={f.d}/>{f.type==='bed'&&<><rect x={f.x+.3} y={f.z+.3} width={f.w-.6} height=".8" rx=".15"/><path d={`M${f.x} ${f.z+1.5}h${f.w}`}/></>}{f.type==='shelf'&&Array.from({length:f.w},(_,k)=><path key={k} d={`M${f.x+k+.4} ${f.z}v${f.d}`}/>)}{f.type==='hearth'&&<path d={`M${f.x+.3} ${f.z+.2}l${f.w-.6} ${f.d-.4}m0 ${-f.d+.4}l${-f.w+.6} ${f.d-.4}`}/>}</g>)}</g>;}
+const FIXED=new Set(['hearth','oven','well','dais','altar']);
+function Furniture({room}:{room:Room}){
+  return <g fill="#f6eedb" stroke="#857b66" strokeWidth=".14">{room.furniture.map((f,i)=>{
+    const cx=f.x+f.w/2,cz=f.z+f.d/2;
+    return <g key={i}>
+      <rect x={f.x} y={f.z} width={f.w} height={f.d} fill={FIXED.has(f.type)?'#e6ddc6':'#f6eedb'} strokeWidth={FIXED.has(f.type)?.22:.14}/>
+      {f.type==='bed'&&<><rect x={f.x+.3} y={f.z+.3} width={f.w-.6} height=".8" rx=".15"/><path d={`M${f.x} ${f.z+1.5}h${f.w}`}/></>}
+      {f.type==='shelf'&&Array.from({length:f.w},(_,k)=><path key={k} d={`M${f.x+k+.4} ${f.z}v${f.d}`}/>)}
+      {f.type==='hearth'&&<><path d={`M${f.x+.4} ${f.z+.4}h${f.w-.8}v${f.d-.8}h${-f.w+.8}Z`} fill="#d8ccb2"/><path d={`M${cx-.5} ${f.z+f.d-.7}q.5-1 .5-1.6.4.5.5 1 .3-.4.3-.9.5.7.5 1.5`} fill="none" strokeWidth=".16"/></>}
+      {f.type==='oven'&&<><path d={`M${f.x+.4} ${f.z+f.d-.4}v${-f.d+1.2}a${f.w/2-.4} ${f.w/2-.4} 0 0 1 ${f.w-.8} 0v${f.d-1.2}Z`} fill="#d8ccb2"/><path d={`M${cx} ${f.z+f.d-.4}v${-1}`} strokeWidth=".2"/></>}
+      {f.type==='well'&&<><circle cx={cx} cy={cz} r={Math.min(f.w,f.d)/2-.3} fill="#c9d3d6"/><circle cx={cx} cy={cz} r={Math.min(f.w,f.d)/2-.9} fill="#8fa6ab"/></>}
+      {f.type==='dais'&&<path d={`M${f.x+.5} ${f.z+f.d-.5}h${f.w-1}`} strokeWidth=".2" strokeDasharray=".7 .5"/>}
+      {f.type==='altar'&&<path d={`M${cx} ${f.z+.3}v${f.d-.6}M${cx-.8} ${f.z+.9}h1.6`} strokeWidth=".2"/>}
+    </g>;
+  })}</g>;
+}
 export function PlanDrawing({plan,floor,options,selected,onSelect,prefix='plan',layer}:{plan:Plan;floor:Floor;options:DrawingOptions;selected?:string;onSelect?:(id:string)=>void;prefix?:string;layer?:BlockLayer}){
   const b=plan.bounds,y=floor.elevation;
   const walls=layer?layer.runs.filter(r=>['wall','chimney'].includes(r.kind)).map(r=>rectPath(r.x,r.z,r.length,1)).join(''):plan.walls.filter(w=>w.y<=y+2&&w.y+w.h>y+2).map(w=>rectPath(w.x,w.z,w.w,w.d)).join('');
@@ -16,14 +31,36 @@ export function PlanDrawing({plan,floor,options,selected,onSelect,prefix='plan',
     <defs><pattern id={`${prefix}-grid`} width="1" height="1" patternUnits="userSpaceOnUse"><path d="M1 0H0V1" fill="none" stroke="#a89e86" strokeWidth=".055" opacity=".4"/></pattern><pattern id={`${prefix}-void`} width="2" height="2" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M0 0V2" stroke="#aea185" strokeWidth=".1"/></pattern><pattern id={`${prefix}-wood`} width="3" height="2" patternUnits="userSpaceOnUse"><path d="M0 0H3M1.5 0V2" stroke="#9b8b6c" strokeWidth=".06" opacity=".45"/></pattern></defs>
     {floor.roofComponents.map(id=>{const c=plan.components.find(c=>c.id===id)!;return <g key={id} opacity=".28"><path d={polygonPath(c.polygon)} fill="#929b98" stroke="#636d66" strokeWidth=".3"/><text x={c.bounds.x+c.bounds.w/2} y={c.bounds.z+c.bounds.d/2} textAnchor="middle" fontFamily="Georgia" fontSize="1.3" fill="#364f43">Roof below</text></g>;})}
     {y===0&&plan.blocks.filter(block=>block.kind==='ground').map((r,i)=><rect key={i} x={r.x} y={r.z} width={r.w} height={r.d} fill={r.material===7?'#c0c9a4':'#d8c9aa'} stroke="#95a17b" strokeWidth=".12"/>)}
-    {y===0&&plan.courts.map(c=><text key={c.id} x={c.bounds.x+c.bounds.w*.65} y={c.bounds.z+c.bounds.d-8} fontSize="2" fontFamily="Georgia" fontStyle="italic" fill="#8b957a" textAnchor="middle">{c.name}</text>)}
+    {y===0&&plan.courts.map(c=><g key={c.id}>
+      {c.yards.map(yard=><g key={yard.name}>
+        <rect x={yard.bounds.x} y={yard.bounds.z} width={yard.bounds.w} height={yard.bounds.d} fill={yard.kind==='garden'?'#c6cfa6':'#ded2b6'} stroke="#a89b7c" strokeWidth=".2" strokeDasharray="1.4 1"/>
+        <text x={yard.bounds.x+yard.bounds.w/2} y={yard.bounds.z+yard.bounds.d/2} textAnchor="middle" fontFamily="Georgia" fontSize="2.1" fill="#7d7357">{yard.name}</text>
+      </g>)}
+      {c.well&&<g><circle cx={c.well.x} cy={c.well.z} r="2.1" fill="#9fb3b8" stroke="#5f7782" strokeWidth=".3"/><circle cx={c.well.x} cy={c.well.z} r="1" fill="#4d6068"/><text x={c.well.x} y={c.well.z+4.4} textAnchor="middle" fontFamily="Georgia" fontSize="1.9" fill="#5d7076">Well</text></g>}
+      <text x={c.gatehouse.x+c.gatehouse.w/2} y={c.gatehouse.z-1.6} textAnchor="middle" fontFamily="Georgia" fontSize="2.2" fill="#6f7560">Gatehouse</text>
+      <text x={c.bounds.x+c.bounds.w*.72} y={c.bounds.z+c.bounds.d*.42} fontSize="2.6" fontFamily="Georgia" fontStyle="italic" fill="#8b957a" textAnchor="middle">{c.name}</text>
+    </g>)}
     {floor.voids.map(v=><g key={v.id}><path d={polygonPath(v.polygon)+v.holes.map(h=>rectPath(h.x,h.z,h.w,h.d)).join('')} fill={`url(#${prefix}-void)`} fillRule="evenodd" stroke="#aa9c81" strokeWidth=".2" strokeDasharray="1 1"/><text x={v.bounds.x+v.bounds.w/2} y={v.bounds.z+v.bounds.d/2} textAnchor="middle" fontFamily="Georgia" fontSize="1.5" fontStyle="italic" fill="#9a8460">Open to hall below<tspan x={v.bounds.x+v.bounds.w/2} dy="2">{v.ceilingY} block ceiling</tspan></text></g>)}
     {floor.rooms.map(r=><g key={r.id}><path d={polygonPath(r.polygon)} fill={options.colors?ROOM_COLORS[r.kind]:'#eee4cd'}/><path d={polygonPath(r.polygon)} fill={`url(#${prefix}-wood)`}/>{r.holes.map((h,i)=><rect key={i} x={h.x} y={h.z} width={h.w+1} height={h.d+1} fill="#b0b4a4"/>)}{options.furniture&&<Furniture room={r}/>}</g>)}
     <path d={walls} fill="#707566"/>
     {plan.openings.filter(o=>o.y<=y+3&&o.y+o.height>y+1).map(o=>{const isX=o.axis==='x',d=o.width;return <g key={o.id}>{!layer&&<rect x={o.x} y={o.z} width={isX?1:d} height={isX?d:1} fill={o.type==='window'?'#b9d5d6':'#ede6d5'}/>}<path d={o.type==='window'?(isX?`M${o.x+.5} ${o.z}v${d}`:`M${o.x} ${o.z+.5}h${d}`):(isX?`M${o.x+.5} ${o.z}h${d}a${d} ${d} 0 0 1 ${-d} ${d}`:`M${o.x} ${o.z+.5}v${d}a${d} ${d} 0 0 0 ${d} ${-d}`)} fill="none" stroke={o.type==='window'?'#597e84':'#8d7c5f'} strokeWidth=".15"/></g>;})}
-    {plan.stairs.filter(st=>st.fromY===y||st.toY===y).map(st=>{const b=st.bounds,up=st.fromY===y;return <g key={st.id} stroke="#616b50" strokeWidth=".13"><rect x={b.x+3} y={b.z+3} width="2" height="6" fill="#d6d7c0"/>{Array.from({length:7},(_,i)=><path key={i} d={`M${b.x+3} ${b.z+3+i}h2`}/>)}<path d={`M${b.x+4} ${b.z+3.4}v5m-0.6-1l.6 1 .6-1`} fill="none" strokeWidth=".22"/><text x={b.x+1} y={b.z+5} fontSize=".8" stroke="none" fill="#63714f">{up?'UP':'DN'}</text></g>;})}
+    {plan.stairs.filter(st=>st.fromY===y||st.toY===y).map(st=>{
+      const b=st.bounds,up=st.fromY===y,to=plan.floors.find(f=>f.elevation===(up?st.toY:st.fromY));
+      return <g key={st.id} stroke="#616b50" strokeWidth=".13">
+        <rect x={b.x+3} y={b.z+3} width="2" height="6" fill="#d6d7c0"/>
+        {Array.from({length:7},(_,i)=><path key={i} d={`M${b.x+3} ${b.z+3+i}h2`}/>)}
+        <path d={`M${b.x+4} ${b.z+3.4}v5m-0.6-1l.6 1 .6-1`} fill="none" strokeWidth=".22"/>
+        <text x={b.x+4} y={b.z+1.9} fontSize="1.35" stroke="none" fill="#4f6146" textAnchor="middle" fontFamily="Georgia,serif" style={{paintOrder:'stroke',stroke:'#f5efdf',strokeWidth:.4}}>
+          {st.id.toUpperCase()} {up?'↑':'↓'}<tspan x={b.x+4} dy="1.5" fontSize="1.05" fill="#6d7c5f">{to?to.name:up?'above':'below'}</tspan>
+        </text>
+      </g>;})}
     {options.grid&&<rect x={b.x} y={b.z} width={b.w} height={b.d} fill={`url(#${prefix}-grid)`} pointerEvents="none"/>}
-    {floor.rooms.map(r=>{const size=r.kind==='circulation'?.9:r.kind==='hall'?1.65:1.15,cx=r.bounds.x+r.bounds.w/2,cz=r.bounds.z+r.bounds.d/2;return <g key={`label-${r.id}`}><path className="room-hit" data-room-id={r.id} d={polygonPath(r.polygon)} fill={selected===r.id?'#4e7d5033':'transparent'} stroke={selected===r.id?'#3e6d48':'none'} strokeWidth=".45" onClick={()=>onSelect?.(r.id)} tabIndex={onSelect?0:undefined} role={onSelect?'button':undefined} aria-label={`${r.name}, ${r.bounds.w-1} by ${r.bounds.d-1} blocks, Y ${r.floorY}`} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onSelect?.(r.id);}}}/>{options.labels&&r.kind!=='stairs'&&<text x={cx} y={cz} fontSize={size} fontFamily="Georgia,serif" textAnchor="middle" fill="#404d3d" style={{paintOrder:'stroke',stroke:'#f5efdf',strokeWidth:.35,pointerEvents:'none'}}>{lines(r.name).map((line,i)=><tspan key={i} x={cx} dy={i?size*1.2:0}>{line}</tspan>)}{options.dimensions&&r.kind!=='circulation'&&<tspan x={cx} dy={size*1.3} fontFamily="sans-serif" fontSize={size*.65} fill="#7e836d">{r.bounds.w-1} × {r.bounds.d-1}</tspan>}</text>}</g>;})}
+    {(()=>{const named=new Set<string>();return floor.rooms.map(r=>{
+      const generic=r.name==='Passage'||r.name==='Cross passage'||r.name==='Landing'||r.name==='Upper landing'||r.name==='Cellar passage';
+      const key=`${r.componentId}:${r.name}`;
+      const showName=!generic||!named.has(key);
+      if(generic)named.add(key);
+      const size=r.kind==='circulation'?1.15:r.kind==='hall'?2.3:1.5,cx=r.bounds.x+r.bounds.w/2,cz=r.bounds.z+r.bounds.d/2;return <g key={`label-${r.id}`}><path className="room-hit" data-room-id={r.id} d={polygonPath(r.polygon)} fill={selected===r.id?'#4e7d5033':'transparent'} stroke={selected===r.id?'#3e6d48':'none'} strokeWidth=".45" onClick={()=>onSelect?.(r.id)} tabIndex={onSelect?0:undefined} role={onSelect?'button':undefined} aria-label={`${r.name}, ${r.bounds.w-1} by ${r.bounds.d-1} blocks, Y ${r.floorY}`} onKeyDown={e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();onSelect?.(r.id);}}}/>{options.labels&&r.kind!=='stairs'&&showName&&<text x={cx} y={cz} fontSize={size} fontFamily="Georgia,serif" textAnchor="middle" fill="#404d3d" style={{paintOrder:'stroke',stroke:'#f5efdf',strokeWidth:.35,pointerEvents:'none'}}>{lines(r.name).map((line,i)=><tspan key={i} x={cx} dy={i?size*1.2:0}>{line}</tspan>)}{options.dimensions&&r.kind!=='circulation'&&<tspan x={cx} dy={size*1.3} fontFamily="sans-serif" fontSize={size*.65} fill="#7e836d">{r.bounds.w-1} × {r.bounds.d-1}</tspan>}</text>}</g>;});})()}
     {options.dimensions&&<g fill="#81906d" stroke="#8e977b" strokeWidth=".12" fontFamily="sans-serif" fontSize="1.5"><path d={`M${b.x+8} ${b.z+3}h${b.w-16}m0-1v2M${b.x+8} ${b.z+2}v2`}/><text x={b.x+b.w/2} y={b.z+1.7} stroke="none" textAnchor="middle">{plan.width} blocks</text><text x={b.x+b.w-3} y={b.z+b.d/2} stroke="none" textAnchor="middle" transform={`rotate(90 ${b.x+b.w-3} ${b.z+b.d/2})`}>{plan.depth} blocks</text></g>}
   </g>);
 }

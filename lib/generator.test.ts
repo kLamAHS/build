@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { generatePlan, tryGenerate } from './architecture.ts';
 import { DEFAULT_SETTINGS, FAMILIES, insidePolygon, type Settings, type Plan } from './model.ts';
 import { voxelize, prepareMeshes, SparseBlocks } from './voxels.ts';
-import { accessGraph, transitViolations, isCirculation, routeToRoom, navigationReport } from './navigation.ts';
+import { accessGraph, transitViolations, isCirculation, routeToRoom, navigationReport, articulationPoints } from './navigation.ts';
 
 export const representatives:Settings[]=(['house','manor','castle'] as const).flatMap(kind=>[128,256].flatMap(size=>[0,1,2].map(i=>({...DEFAULT_SETTINGS,kind,size,seed:`REVIEW-${kind}-${size}-${i}`,family:FAMILIES[kind][i].id}))));
 const reference=generatePlan(DEFAULT_SETTINGS);
@@ -19,7 +19,21 @@ function audit(p:Plan){
     }
     if(door.type==='door'){
       const rooms=door.roomIds.map(id=>p.rooms.find(r=>r.id===id)!);
-      for(const r of rooms){const b=r.bounds;assert.ok(door.axis==='x'?(door.x===b.x||door.x===b.x+b.w):(door.z===b.z||door.z===b.z+b.d),`${door.id} is not on a shared wall`);}
+      for(const r of rooms){
+        const outline=new Set<string>();
+        for(let i=0;i<r.polygon.length;i++){
+          const v=r.polygon[i],w=r.polygon[(i+1)%r.polygon.length];
+          const steps=Math.max(Math.abs(w.x-v.x),Math.abs(w.z-v.z));
+          for(let k=0;k<=steps;k++){
+            const t=steps?k/steps:0;
+            outline.add(`${Math.round(v.x+(w.x-v.x)*t)},${Math.round(v.z+(w.z-v.z)*t)}`);
+          }
+        }
+        for(let k=0;k<door.width;k++){
+          const cell=door.axis==='x'?`${door.x},${door.z+k}`:`${door.x+k},${door.z}`;
+          assert.ok(outline.has(cell),`${door.id} is not on a wall of ${r.name}`);
+        }
+      }
     }
   }
   for(const st of p.stairs){
@@ -45,8 +59,11 @@ function audit(p:Plan){
   assert.equal(graph.unreachable.length,0,`${p.settings.seed}: ${graph.unreachable.length} rooms have no route from the entrance`);
   const forced=transitViolations(p,graph);
   assert.deepEqual(forced.map(t=>`${t.name} strands ${t.strands.length}`),[],`${p.settings.seed}: a household is forced to cross these rooms`);
+  const inSuite=new Map(p.suites.flatMap(u=>u.roomIds.filter(id=>id!==u.headId).map(id=>[id,u] as const)));
   for(const r of p.rooms.filter(r=>!isCirculation(r))){
     const doors=p.connections.filter(e=>e.includes(r.id)).map(([a,b])=>p.rooms.find(x=>x.id===(a===r.id?b:a))!);
+    const suite=inSuite.get(r.id);
+    if(suite){assert.ok(doors.some(d=>d.id===suite.headId),`${p.settings.seed}: ${r.name} is not entered from ${suite.name}`);continue;}
     assert.ok(doors.some(isCirculation),`${p.settings.seed}: ${r.name} has no door onto circulation`);
   }
   assert.ok(p.navigation.loops>=1,`${p.settings.seed}: the doors form a bare tree with only one route to everywhere`);
@@ -65,23 +82,23 @@ function audit(p:Plan){
   }
   return grid;
 }
-test('permanent manor: a tall hall, three occupied domestic levels, service end and gallery',()=>{
+void test('permanent manor: a tall hall, three occupied domestic levels, service end and gallery',()=>{
   assert.equal(reference.name,'Alderhall Manor');assert.ok(reference.components.some(c=>c.kind==='domestic'&&c.storeys===3));
   assert.ok(reference.rooms.some(r=>r.kind==='gallery'&&r.floorY===6));assert.ok(reference.floors.find(f=>f.elevation===12)!.voids.length);
   assert.ok(reference.components.some(c=>c.baseY===0)&&reference.components.some(c=>c.baseY===-6));audit(reference);
 });
-test('18 medium and large representatives have coherent architecture and matching block geometry',()=>{for(const settings of representatives)audit(generatePlan(settings));});
-test('bounded failures report conflicts instead of emitting invalid buildings',()=>{
+void test('18 medium and large representatives have coherent architecture and matching block geometry',()=>{for(const settings of representatives)audit(generatePlan(settings));});
+void test('bounded failures report conflicts instead of emitting invalid buildings',()=>{
   assert.equal(tryGenerate({...DEFAULT_SETTINGS,size:513}).ok,false);assert.equal(tryGenerate({...DEFAULT_SETTINGS,floors:9}).ok,false);assert.equal(tryGenerate({...DEFAULT_SETTINGS,kind:'house',family:'palace'}).ok,false);
 });
-test('seed and version determinism, including semantic and voxel operations',()=>{assert.deepEqual(generatePlan(DEFAULT_SETTINGS),reference);assert.equal(reference.schemaVersion,2);assert.equal(reference.generatorVersion,'2.0');});
-test('upper floors change partitions, footprints, occupancy and voids',()=>{
+void test('seed and version determinism, including semantic and voxel operations',()=>{assert.deepEqual(generatePlan(DEFAULT_SETTINGS),reference);assert.equal(reference.schemaVersion,2);assert.equal(reference.generatorVersion,'2.0');});
+void test('upper floors change partitions, footprints, occupancy and voids',()=>{
   const c=reference.components.find(c=>c.kind==='domestic')!;
   const levels=[0,6,12].map(y=>reference.rooms.filter(r=>r.componentId===c.id&&r.floorY===y));
   assert.notDeepEqual(levels[0].map(r=>r.bounds),levels[1].map(r=>r.bounds));assert.notDeepEqual(levels[1].map(r=>r.bounds),levels[2].map(r=>r.bounds));
   const grid=voxelize(reference),hall=reference.rooms.find(r=>r.kind==='hall')!,x=hall.bounds.x+8,z=hall.bounds.z+8;assert.ok(grid.material(x,0,z));assert.equal(grid.material(x,6,z),0);
 });
-test('families and seeds vary component graph and proportions beyond rotations or translations',()=>{
+void test('families and seeds vary component graph and proportions beyond rotations or translations',()=>{
   const signatures=new Set<string>(),graphs=new Set<string>();
   for(const kind of ['castle','manor','house'] as const)for(const family of FAMILIES[kind])for(let i=0;i<4;i++){
     const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,seed:`VARIETY-${i}`,size:160});
@@ -90,20 +107,20 @@ test('families and seeds vary component graph and proportions beyond rotations o
   }
   assert.ok(signatures.size>=38,`Only ${signatures.size} distinct compositions`);assert.ok(graphs.size>=15,`Only ${graphs.size} connection graphs`);
 });
-test('compact, maximum storeys and a 512-block site remain sparse and navigable',()=>{
+void test('compact, maximum storeys and a 512-block site remain sparse and navigable',()=>{
   for(const kind of ['house','manor','castle'] as const)audit(generatePlan({...DEFAULT_SETTINGS,kind,family:'auto',size:48,floors:1,cellar:false,seed:'COMPACT'}));
   const start=performance.now(),p=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'double-ward',size:512,floors:8,seed:'LARGEST-512'}),grid=audit(p),meshes=prepareMeshes(grid);
   assert.ok(p.width<=512&&p.depth<=512);assert.equal(Math.max(...p.rooms.map(r=>r.floorY)),42);assert.ok(grid.stats().bytes<32*1024*1024);assert.ok(meshes.length<240);assert.ok(performance.now()-start<10000,'Largest build exceeded ten seconds');
   assert.ok(meshes.reduce((n,m)=>n+m.indices.length/3,0)<grid.stats().blocks*8);
 });
-test('greedy exposed faces and layers come from exactly the same occupied cells',()=>{
+void test('greedy exposed faces and layers come from exactly the same occupied cells',()=>{
   const grid=new SparseBlocks({x:-16,z:-16,w:48,d:48});grid.apply({x:-1,y:0,z:-1,w:3,d:4,h:2,material:1,kind:'wall',componentId:'test'});grid.apply({x:0,y:0,z:0,w:1,d:1,h:2,material:0,kind:'air',componentId:'test'});
   const mesh=prepareMeshes(grid);let surface=0;
   for(const m of mesh)for(let i=0;i<m.indices.length;i+=3){const points=[0,1,2].map(k=>{const a=m.indices[i+k]*3;return [m.positions[a],m.positions[a+1],m.positions[a+2]];});const a=points[1].map((n,j)=>n-points[0][j]),b=points[2].map((n,j)=>n-points[0][j]);surface+=Math.hypot(a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0])/2;}
   let faces=0;for(let x=-1;x<2;x++)for(let z=-1;z<3;z++)for(let y=0;y<2;y++)if(grid.material(x,y,z))for(const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]])if(!grid.material(x+dx,y+dy,z+dz))faces++;
   assert.equal(surface,faces);assert.equal(grid.layer(0).counts[1],11);assert.equal(grid.material(0,0,0),0);
 });
-test('a chapel is never reached through the kitchens, and no chamber is a corridor',()=>{
+void test('a chapel is never reached through the kitchens, and no chamber is a corridor',()=>{
   // The reported defect: the only door into the chapel opened off the kitchen, so the household walked
   // Entrance -> Screens passage -> Great hall -> Cross passage -> Kitchen -> Chapel to reach the altar.
   const chapel=reference.rooms.find(r=>r.kind==='sacred')!;
@@ -120,7 +137,7 @@ test('a chapel is never reached through the kitchens, and no chamber is a corrid
     }
   }
 });
-test('every family and size walks well: no forced crossings, real alternative routes, shallow reach',()=>{
+void test('every family and size walks well: no forced crossings, real alternative routes, shallow reach',()=>{
   const reports=[];
   for(const kind of ['house','manor','castle'] as const)for(const family of FAMILIES[kind])for(const size of [96,160,256]){
     const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size,floors:3,seed:`WALK-${size}`});
@@ -134,7 +151,7 @@ test('every family and size walks well: no forced crossings, real alternative ro
   const mean=reports.reduce((n,r)=>n+r.score,0)/reports.length;
   assert.ok(mean>=80,`mean navigability ${mean.toFixed(1)} is below the 80 this generator is expected to hold`);
 });
-test('every family builds across the size and storey range, including chamfered towers',()=>{
+void test('every family builds across the size and storey range, including chamfered towers',()=>{
   // A passage hugging a tower's wall pinched below two walkable blocks where the chamfer cuts the corner,
   // which the voxel audit rejected and which no reroll could recover.
   const failures:string[]=[];
@@ -146,4 +163,228 @@ test('every family builds across the size and storey range, including chamfered 
     else assert.equal(result.plan.navigation.unreachable.length,0,`${kind}/${family.id}/${size}/${floors}: unreachable rooms`);
   }
   assert.deepEqual(failures,[]);
+});
+/** Would closing one of this room's doors part the plan or force a household through somewhere private? */
+function loadBearing(p:Plan,roomId:string){
+  const doors=p.connections.filter(e=>e.includes(roomId));
+  return doors.some(([a,b])=>{
+    const adjacency=new Map(p.rooms.map(r=>[r.id,[] as string[]]));
+    for(const [m,n] of p.connections){if(m===a&&n===b)continue;adjacency.get(m)?.push(n);adjacency.get(n)?.push(m);}
+    const entry=p.openings.find(o=>o.type==='entrance')!.roomIds[0];
+    const seen=new Set([entry]),queue=[entry];
+    for(let i=0;i<queue.length;i++)for(const next of adjacency.get(queue[i])!)if(!seen.has(next)){seen.add(next);queue.push(next);}
+    if(seen.size<p.rooms.length)return true;
+    const byId=new Map(p.rooms.map(r=>[r.id,r]));
+    return [...articulationPoints({adjacency,depth:new Map(),entry,unreachable:[]}).keys()].some(id=>{const r=byId.get(id);return r&&!isCirculation(r);});
+  });
+}
+void test('chambers are furnished, lit and private: a bed to sleep in and no second way through',()=>{
+  // Regressions caught after the circulation work: a fixed 3x4 bed and a door clearance reaching seven
+  // blocks through the wall left 27% of bedchambers empty, and extra doors turned 16% into shortcuts.
+  let bedrooms=0,bare=0,shortcuts=0,windowless=0,landlocked=0;
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    const byId=new Map(p.rooms.map(r=>[r.id,r]));
+    const lit=new Set(p.openings.filter(o=>o.type==='window').flatMap(o=>o.roomIds));
+    for(const room of p.rooms){
+      if(room.kind==='bedroom'){
+        bedrooms++;
+        if(!room.furniture.some(f=>f.type==='bed'))bare++;
+        const onto=p.connections.filter(e=>e.includes(room.id)).map(([a,b])=>byId.get(a===room.id?b:a)!).filter(isCirculation);
+        if(onto.length>1&&!loadBearing(p,room.id))shortcuts++;
+      }
+      if(isCirculation(room)||room.floorY<0||lit.has(room.id))continue;
+      windowless++;
+      // A room with no outside face cannot have a window; that is a massing question, not a window one.
+      const b=room.bounds,outside=(x:number,z:number)=>!p.rooms.some(o=>o.floorY<=room.floorY&&o.ceilingY>room.floorY&&insidePolygon(x,z,o.polygon));
+      const hasFace=[[b.x-.5,b.z+1.5],[b.x+b.w+.5,b.z+1.5],[b.x+1.5,b.z-.5],[b.x+1.5,b.z+b.d+.5]].some(([x,z])=>outside(x,z));
+      if(!hasFace)landlocked++;
+    }
+  }
+  assert.ok(bare/bedrooms<=0.03,`${bare} of ${bedrooms} bedchambers have no bed`);
+  assert.equal(shortcuts,0,`${shortcuts} bedchambers have a second door onto circulation that nothing needed`);
+  assert.ok((windowless-landlocked)/Math.max(1,windowless)<=0.5,`${windowless-landlocked} of ${windowless} windowless chambers do have an outside wall`);
+});
+void test('rooms have shape and scale, not a grid of equal boxes',()=>{
+  // The complaint this answers: "a collection of hallways and rectangle rooms packed together".
+  let shaped=0,rooms=0;const ratios:number[]=[];
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    for(const r of p.rooms){
+      rooms++;
+      if(r.polygon.length>4)shaped++;
+      // Whatever its shape, a room keeps a straight run of wall long enough to take a door.
+      const b=r.bounds;
+      assert.ok(b.w>=4&&b.d>=4,`${settings.seed}: ${r.name} is ${b.w}x${b.d}`);
+    }
+    const byRange=new Map<string,number[]>();
+    for(const r of p.rooms){
+      if(isCirculation(r))continue;
+      const key=`${r.componentId}:${r.floorY}`;
+      byRange.set(key,[...(byRange.get(key)??[]),r.area]);
+    }
+    for(const areas of byRange.values())if(areas.length>1)ratios.push(Math.max(...areas)/Math.min(...areas));
+  }
+  const shapedShare=shaped/rooms,hierarchy=ratios.reduce((a,b)=>a+b,0)/ratios.length;
+  assert.ok(shapedShare>=0.05,`only ${(shapedShare*100).toFixed(1)}% of rooms are anything but a rectangle`);
+  assert.ok(hierarchy>=3,`the largest room in a range is only ${hierarchy.toFixed(1)}x the smallest`);
+  // The two rooms whose shape carries meaning.
+  const hall=reference.rooms.find(r=>r.kind==='hall')!;
+  assert.ok(hall.polygon.length>4,'the great hall has no dais end');
+  const chapel=reference.rooms.find(r=>r.kind==='sacred')!;
+  assert.ok(chapel.polygon.length>8,'the chapel has no apse');
+});
+void test('ordinary rooms keep their proportions: no strip a wing long, nothing that has eaten its range',()=>{
+  // The complaint this answers: a solar, a pantry and a household dining room each drawn as a band the
+  // length of the wing, because a minimum area is satisfied by a strip and a target with no ceiling is
+  // satisfied by whatever is left over. Every ordinary room now has an upper bound on both.
+  const ORDINARY=['bedroom','study','service','storage'];
+  let counted=0,worstShape=0,worstSize=0,shape='',size='';
+  for(const kind of ['house','manor','castle'] as const)for(const family of FAMILIES[kind])for(const budget of [96,192,384]){
+    const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size:budget,floors:3,seed:`FIT-${budget}`});
+    for(const r of p.rooms){
+      if(!ORDINARY.includes(r.kind))continue;
+      counted++;
+      const w=r.bounds.w-1,d=r.bounds.d-1,aspect=Math.max(w,d)/Math.min(w,d);
+      if(aspect>worstShape){worstShape=aspect;shape=`${r.name} ${w}x${d} (${family.id}/${budget})`;}
+      if(w*d>worstSize){worstSize=w*d;size=`${r.name} ${w}x${d} (${family.id}/${budget})`;}
+    }
+  }
+  assert.ok(counted>500,`only ${counted} ordinary rooms surveyed`);
+  assert.ok(worstShape<=3.2,`the longest ordinary room is ${worstShape.toFixed(1)} times its width: ${shape}`);
+  assert.ok(worstSize<=760,`the largest ordinary room has taken ${worstSize} blocks: ${size}`);
+});
+void test('a range deeper than it is wide is walked along its length, not cut into two long strips',()=>{
+  // A wing eighty blocks deep and twenty wide cannot be divided by a passage across it: both halves come
+  // out as strips the length of the wing. Such a range takes one walk down its flank and a rank behind it.
+  const p=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'courtyard-castle',size:256,floors:2,seed:'GRAIN'});
+  const wing=p.components.find(c=>c.kind==='domestic'&&c.bounds.d>=c.bounds.w*1.7);
+  assert.ok(wing,'the courtyard castle has no deep residential range');
+  const inWing=p.rooms.filter(r=>r.componentId===wing!.id&&r.floorY===0);
+  const walk=inWing.find(r=>isCirculation(r)&&r.bounds.d>=wing!.bounds.d-1);
+  assert.ok(walk,`no walk runs the length of the wing: ${inWing.filter(isCirculation).map(r=>`${r.name} ${r.bounds.w}x${r.bounds.d}`).join(', ')}`);
+  // The rank behind it is a sequence of rooms, each of them a room rather than a band.
+  const rank=inWing.filter(r=>!isCirculation(r));
+  assert.ok(rank.length>=3,`the wing holds only ${rank.length} rooms behind its walk`);
+  for(const r of rank)assert.ok(r.bounds.d<wing!.bounds.d/2,`${r.name} is ${r.bounds.w}x${r.bounds.d} in a wing ${wing!.bounds.d} deep`);
+  // And the walk fronts the court, so the yard has an edge rather than a row of chamber walls.
+  const court=p.rooms.find(r=>r.kind==='court')!;
+  assert.ok(p.connections.some(([a,b])=>(a===walk!.id&&b===court.id)||(b===walk!.id&&a===court.id)),'the wing walk does not open onto the court');
+});
+void test('the hall is entered through its own screens, never off a passage in its flank',()=>{
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    const hall=p.rooms.find(r=>r.kind==='hall')!;
+    const doors=p.connections.filter(e=>e.includes(hall.id)).map(([a,b])=>p.rooms.find(r=>r.id===(a===hall.id?b:a))!);
+    assert.ok(doors.some(r=>r.name==='Screens passage'),`${settings.seed}: the hall has no screens passage door`);
+    // Any other door into the hall is at one of its ends — the dais, or the screens — never mid-flank.
+    const b=hall.bounds,along=b.d>=b.w?'z':'x',lo=along==='z'?b.z:b.x,len=along==='z'?b.d:b.w;
+    for(const o of p.openings.filter(o=>o.type==='door'&&o.roomIds.includes(hall.id))){
+      const other=p.rooms.find(r=>r.id===o.roomIds.find(id=>id!==hall.id))!;
+      if(other.componentId===hall.componentId)continue;
+      const flank=(along==='z')!==(o.axis==='z');
+      const at=along==='z'?o.z:o.x;
+      if(!flank||at<=lo+7||at>=lo+len-8)continue;
+      // Mid-flank is a last resort, cut only where a range has no other way into the house at all.
+      assert.ok(isCirculation(other),`${settings.seed}: ${other.name} opens into the middle of the hall's flank`);
+      const without={...p,connections:p.connections.filter(([a,b])=>!o.roomIds.includes(a)||!o.roomIds.includes(b))};
+      assert.ok(accessGraph(without).unreachable.includes(other.id),`${settings.seed}: ${other.name} takes a mid-flank hall door it does not need`);
+    }
+  }
+});
+void test('a suite is entered as a set: its closet opens off its chamber, not off the corridor',()=>{
+  // The critique this answers: "several guest wardrobes appear to open from shared passages rather than
+  // directly from their associated guest chambers ... a poor default for storage belonging to a suite."
+  let suites=0;
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    const byId=new Map(p.rooms.map(r=>[r.id,r]));
+    for(const suite of p.suites){
+      suites++;
+      const head=byId.get(suite.headId)!;
+      assert.ok(head,`${settings.seed}: suite ${suite.id} has no chamber`);
+      for(const id of suite.roomIds){
+        if(id===suite.headId)continue;
+        const member=byId.get(id)!;
+        const doors=p.connections.filter(e=>e.includes(id)).map(([a,b])=>byId.get(a===id?b:a)!);
+        assert.ok(doors.some(d=>d.id===head.id),`${settings.seed}: ${member.name} is not entered from ${head.name}`);
+        assert.ok(!doors.some(isCirculation),`${settings.seed}: ${member.name} opens off ${doors.filter(isCirculation).map(d=>d.name).join(', ')}`);
+        assert.equal(member.suiteId,suite.id);
+      }
+    }
+    // Carrying your own closet is not being a corridor, and nothing else may be carried through a chamber.
+    for(const t of navigationReport(p).transits)assert.fail(`${settings.seed}: ${t.name} carries ${t.strands.length} rooms`);
+  }
+  assert.ok(suites>=representatives.length,`only ${suites} suites across ${representatives.length} plans`);
+});
+void test('a defended enclosure is a building: wall mass, a gatehouse, and a yard that works',()=>{
+  // The critique this answers: "the long walls, tiny corner-tower outlines and unresolved southern edge do
+  // not communicate an inhabitable defensive structure ... where is the entrance through that enclosure?"
+  const castle=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'keep-bailey',size:200,floors:3,seed:'ENCLOSURE'});
+  assert.ok(castle.courts.length>0,'a castle has no enclosure');
+  for(const court of castle.courts){
+    assert.ok(court.thickness>=2,`${court.name} curtain is ${court.thickness} block thick`);
+    // The gate is a passage through the gatehouse, not a gap in a line.
+    assert.ok(court.gatehouse.w>=court.thickness*3,`${court.name} gatehouse is too slight to pass through`);
+    assert.ok(court.gate.x>court.gatehouse.x&&court.gate.x<court.gatehouse.x+court.gatehouse.w,'the gate is not in the gatehouse');
+    assert.ok(court.gatehouse.z<=court.gate.z&&court.gatehouse.z+court.gatehouse.d>=court.gate.z,'the gatehouse does not straddle the curtain');
+    // The curtain is really that thick in blocks, not just in the record.
+    const wall=castle.walls.filter(w=>w.componentId===court.id&&w.y===0);
+    assert.ok(wall.length>0,`${court.name} has no wall blocks`);
+  }
+  const inner=castle.courts[0];
+  assert.ok(inner.yards.length>0,'the bailey is left as blank canvas');
+  assert.ok(inner.well,'the household has no water in its yard');
+  for(const yard of inner.yards){
+    assert.ok(yard.bounds.w>=8&&yard.bounds.d>=8,`${yard.name} is too small to work in`);
+    assert.ok(yard.bounds.x>=inner.bounds.x&&yard.bounds.x+yard.bounds.w<=inner.bounds.x+inner.bounds.w,`${yard.name} is outside the walls`);
+  }
+  // A kitchen is an installation, wherever it is: fire and oven, not a table and a token hearth.
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    for(const kitchen of p.rooms.filter(r=>r.name==='Kitchen'&&r.bounds.w>=9&&r.bounds.d>=9)){
+      const fittings=new Set(kitchen.furniture.map(f=>f.type));
+      assert.ok(fittings.has('hearth')&&fittings.has('oven'),`${settings.seed}: the kitchen has no ${fittings.has('hearth')?'oven':'fire'}`);
+    }
+  }
+  // The hall's long axis runs the way its ceremony does, and it has a head to the room.
+  const hall=reference.rooms.find(r=>r.kind==='hall')!;
+  assert.ok(hall.bounds.d>hall.bounds.w,`the hall is ${hall.bounds.w} across and only ${hall.bounds.d} deep`);
+  const fittings=new Set(hall.furniture.map(f=>f.type));
+  assert.ok(fittings.has('dais')&&fittings.has('hearth')&&fittings.has('table'),'the hall has no dais, hearth or table');
+});
+void test('the courtyard castle is organised by its site: gate, court, hall, services, private side',()=>{
+  // The specification's reference composition: a southern gatehouse opens into a usable central court; the
+  // hall occupies the northern range with its service end toward the kitchen and its high end toward the
+  // private accommodation; the chapel is reachable without traversing private rooms.
+  for(const size of [128,200,320,480])for(const floors of [2,4]){
+    const settings={...DEFAULT_SETTINGS,kind:'castle' as const,family:'courtyard-castle' as const,size,floors,seed:`QUAD-${floors}`};
+    const p=generatePlan(settings);
+    const tag=`${size}/${floors}`;
+    const court=p.rooms.find(r=>r.kind==='court');
+    assert.ok(court,`${tag}: there is no court`);
+    assert.ok(court!.bounds.w>=20&&court!.bounds.d>=20,`${tag}: the court is ${court!.bounds.w}x${court!.bounds.d}`);
+    // Every range fronts the yard: the court is what joins them, not a chain of rooms.
+    const onto=p.connections.filter(e=>e.includes(court!.id)).map(([a,b])=>p.rooms.find(r=>r.id===(a===court!.id?b:a))!);
+    assert.ok(onto.length>=3,`${tag}: only ${onto.length} rooms open onto the court`);
+    const gateRange=new Set(p.components.filter(c=>c.kind==='gatehouse').map(c=>c.id));
+    const oddity=onto.filter(r=>!isCirculation(r)&&!gateRange.has(r.componentId));
+    assert.deepEqual(oddity.map(r=>r.name),[],`${tag}: the court opens straight into ${oddity.map(r=>r.name).join(', ')}`);
+    // You arrive through the gatehouse, cross the court, and enter the hall through its screens.
+    const hall=p.rooms.find(r=>r.kind==='hall')!;
+    const walk=routeToRoom(p,hall.id).map(r=>r.name);
+    assert.ok(walk[0]?.startsWith('Gate'),`${tag}: the walk begins at ${walk[0]}`);
+    assert.ok(walk.includes('Inner court'),`${tag}: the hall is reached without crossing the court: ${walk.join(' -> ')}`);
+    assert.equal(walk[walk.length-2],'Screens passage',`${tag}: the hall is entered from ${walk[walk.length-2]}`);
+    // The chapel is reached without passing through anybody's chamber.
+    for(const chapel of p.rooms.filter(r=>r.kind==='sacred')){
+      const crossed=routeToRoom(p,chapel.id).slice(0,-1).filter(r=>!isCirculation(r));
+      assert.deepEqual(crossed.map(r=>r.name),[],`${tag}: the chapel is reached through ${crossed.map(r=>r.name).join(', ')}`);
+    }
+    assert.deepEqual(navigationReport(p).transits.map(t=>t.name),[],`${tag}: forced crossings`);
+  }
+  // A larger budget buys a larger quadrangle.
+  const small=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'courtyard-castle',size:128,floors:3,seed:'SCALE'});
+  const large=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'courtyard-castle',size:480,floors:3,seed:'SCALE'});
+  assert.ok(large.totalArea>small.totalArea*1.5,`480 blocks buys ${large.totalArea} against ${small.totalArea} for 128`);
 });

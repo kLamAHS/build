@@ -1,10 +1,10 @@
 import { type Navigation, type Plan, type Room, type RoomKind, type Transit } from './model.ts';
 
 /** Rooms a household may cross to reach somewhere else. Everything else is a destination, not a route. */
-export const CIRCULATION_KINDS:readonly RoomKind[]=['circulation','stairs','gallery','hall'];
+export const CIRCULATION_KINDS:readonly RoomKind[]=['circulation','stairs','gallery','hall','court'];
 export const isCirculation=(r:Room)=>CIRCULATION_KINDS.includes(r.kind);
 /** How private a room is. A route forced through a steward's office is a compromise; a bedchamber is not. */
-export const ROOM_PRIVACY:Record<RoomKind,number>={circulation:0,stairs:0,hall:1,gallery:1,sacred:2,study:3,service:3,storage:4,bedroom:5};
+export const ROOM_PRIVACY:Record<RoomKind,number>={court:0,circulation:0,stairs:0,hall:1,gallery:1,sacred:2,study:3,service:3,storage:4,bedroom:5};
 
 export type AccessGraph={adjacency:Map<string,string[]>;depth:Map<string,number>;entry:string|undefined;unreachable:string[]};
 
@@ -62,9 +62,13 @@ export function articulationPoints(graph:AccessGraph):Map<string,string[]> {
 /** Rooms that are not circulation and yet carry other rooms' only route. These are the layout's defects. */
 export function transitViolations(plan:Plan,graph=accessGraph(plan)):Transit[] {
   const byId=new Map(plan.rooms.map(r=>[r.id,r])),violations:Transit[]=[];
+  const suiteOf=new Map<string,Plan['suites'][number]>();
+  for(const suite of plan.suites)for(const id of suite.roomIds)suiteOf.set(id,suite);
   for(const [id,strands] of articulationPoints(graph)){
     const room=byId.get(id);
     if(!room||isCirculation(room))continue;
+    const suite=suiteOf.get(id);
+    if(suite&&suite.headId===id&&strands.every(s=>suite.roomIds.includes(s)))continue;
     violations.push({roomId:id,name:room.name,kind:room.kind,floorY:room.floorY,strands});
   }
   return violations.sort((a,b)=>b.strands.length-a.strands.length||a.roomId.localeCompare(b.roomId));
@@ -75,7 +79,8 @@ export function navigationReport(plan:Plan):Navigation {
   const graph=accessGraph(plan),transits=transitViolations(plan,graph),depths=[...graph.depth.values()];
   const maxDepth=depths.length?Math.max(...depths):0;
   const meanDepth=depths.length?depths.reduce((a,b)=>a+b,0)/depths.length:0;
-  const loops=plan.connections.length-plan.rooms.length+1;
+  const doorways=new Set(plan.connections.map(([a,b])=>a<b?`${a}|${b}`:`${b}|${a}`)).size;
+  const loops=doorways-plan.rooms.length+1;
   const stranded=new Set(transits.flatMap(t=>t.strands));
   // A forced crossing is the defect this generator exists to avoid, so it dominates the score.
   const crossings=Math.min(60,transits.length*12+stranded.size*2);
@@ -94,7 +99,8 @@ export function routeToRoom(plan:Plan,roomId:string,graph=accessGraph(plan)):Roo
     const room=byId.get(here);
     if(!room)break;
     route.push(room);
-    const step=graph.adjacency.get(here)!.find(n=>graph.depth.get(n)===graph.depth.get(here)!-1);
+    const back=graph.adjacency.get(here)!.filter(n=>graph.depth.get(n)===graph.depth.get(here)!-1);
+    const step=back.sort((m,n)=>(ROOM_PRIVACY[byId.get(m)?.kind??'circulation']-ROOM_PRIVACY[byId.get(n)?.kind??'circulation'])||m.localeCompare(n))[0];
     if(step===undefined)break;
     here=step;
   }
