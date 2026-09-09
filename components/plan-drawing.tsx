@@ -1,9 +1,25 @@
 'use client';
+import { Children, cloneElement, isValidElement, type ReactNode, type ReactElement } from 'react';
 import type { Floor, Plan, Room } from '@/lib/generator';
 import { ROOM_COLORS, roomWorld } from '@/lib/generator';
 
 export type DrawingOptions = { labels:boolean; furniture:boolean; grid:boolean; dimensions:boolean; colors:boolean };
 type Props={plan:Plan;floor:Floor;options:DrawingOptions;selected?:string;onSelect?:(id:string)=>void;prefix?:string};
+// Transcendental math can vary in its final decimal between Worker and browser
+// engines. Architectural coordinates need five decimals, not machine precision.
+export function preciseSvg(node:ReactNode):ReactNode {
+  return Children.map(node,child=>{
+    if(!isValidElement(child))return child;
+    const element=child as ReactElement<Record<string,unknown>>;
+    const props:Record<string,unknown>={};
+    if(typeof element.type==='string')for(const [key,value] of Object.entries(element.props)){
+      if(typeof value==='number'&&Number.isFinite(value))props[key]=Number(value.toFixed(5));
+      else if(typeof value==='string'&&['d','transform','points','viewBox'].includes(key))props[key]=value.replace(/-?\d+(?:\.\d+)?(?:e[-+]?\d+)?/gi,n=>String(Number(Number(n).toFixed(5))));
+    }
+    if(element.props.children!==undefined)props.children=preciseSvg(element.props.children as ReactNode);
+    return cloneElement(element,props);
+  });
+}
 function Furnishings({room}:{room:Room}){
   const sx=Math.min(1,room.w/8),sy=Math.min(1,room.h/10);
   return <g transform={`translate(${room.x} ${room.y}) scale(${sx} ${sy})`}><FurnitureSymbols room={{...room,x:0,y:0,w:room.w/sx,h:room.h/sy}}/></g>;
@@ -25,13 +41,13 @@ function RoomLabel({room,plan,floor}:{room:Room;plan:Plan;floor:Floor}){
   const c=roomWorld(room,floor.wings[room.wing]);
   const words=room.name.split(' ');const lines=words.length>1?[words.slice(0,-1).join(' '),words.at(-1)!]:words;
   const size=Math.max(1.6,Math.min(2.1,plan.bounds.w/88));
-  return <text x={c.x} y={c.y} fontFamily="Georgia,serif" fontSize={size} textAnchor="middle" fill="#464b3e" style={{paintOrder:'stroke',stroke:'#f4f0e3',strokeWidth:.65,strokeLinejoin:'round',pointerEvents:'none'}}>{lines.map((line,i)=><tspan key={i} x={c.x} dy={i===0?-(lines.length-1)*size*.5:size*1.12}>{line}</tspan>)}</text>;
+  return preciseSvg(<text x={c.x} y={c.y} fontFamily="Georgia,serif" fontSize={size} textAnchor="middle" fill="#464b3e" style={{paintOrder:'stroke',stroke:'#f4f0e3',strokeWidth:.65,strokeLinejoin:'round',pointerEvents:'none'}}>{lines.map((line,i)=><tspan key={i} x={c.x} dy={i===0?-(lines.length-1)*size*.5:size*1.12}>{line}</tspan>)}</text>);
 }
 export function PlanDrawing({plan,floor,options,selected,onSelect,prefix='plan'}:Props){
   const b=plan.bounds,verts=plan.vertices;
   const cx=verts.reduce((a,v)=>a+v.x,0)/verts.length,cy=verts.reduce((a,v)=>a+v.y,0)/verts.length;
   const top=b.y+10,left=b.x+12,right=b.x+b.w-12,bottom=b.y+b.h-23;
-  return <g>
+  return preciseSvg(<g>
     <defs>
       <pattern id={`${prefix}-grid`} width="2" height="2" patternUnits="userSpaceOnUse"><path d="M2 0H0V2" fill="none" stroke="#a79e86" strokeWidth=".06" opacity=".28"/></pattern>
       <pattern id={`${prefix}-stone`} width="2" height="1.2" patternUnits="userSpaceOnUse"><path d="M0 0h2M0 1.2h2M1 0v1.2" stroke="#8f8e7d" strokeWidth=".07" opacity=".4"/></pattern>
@@ -74,5 +90,5 @@ export function PlanDrawing({plan,floor,options,selected,onSelect,prefix='plan'}
       <path d={`M${left} ${top-3}H${right}M${left} ${top-4}v2m${right-left} -2v2 M${right+5} ${top+4}V${bottom}m-1 0h2m-2 ${top+4-bottom}h2`} fill="none"/>
       <text x={(left+right)/2} y={top-4.3} textAnchor="middle" stroke="none">{plan.width} units</text><text transform={`translate(${right+7.5},${(top+4+bottom)/2}) rotate(90)`} textAnchor="middle" stroke="none">{plan.depth} units</text>
     </g>}
-  </g>;
+  </g>);
 }

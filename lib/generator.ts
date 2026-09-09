@@ -11,6 +11,14 @@ export type Plan = { name: string; settings: Settings; floors: Floor[]; bounds: 
 export const DEFAULT_SETTINGS: Settings = { kind: 'castle', size: 128, floors: 3, organic: 65, courtyard: true, chapel: true, garden: true, cellar: false, seed: 'RAVEN-2847' };
 export const ROOM_COLORS: Record<RoomKind, string> = { hall: '#e8dfc7', bedroom: '#dce2d7', service: '#eadbc9', sacred: '#e0dce6', storage: '#ddd9cd', study: '#d4e0df', gate: '#dfdaca' };
 export const ROOM_GROUPS: Record<RoomKind, string> = { hall: 'Gathering', bedroom: 'Living quarters', service: 'Service', sacred: 'Sacred', storage: 'Storage', study: 'Study', gate: 'Circulation' };
+function stabilizeCoordinates(value:unknown,seen=new WeakSet<object>()):void {
+  if(!value||typeof value!=='object'||seen.has(value))return;
+  seen.add(value);
+  for(const [key,item] of Object.entries(value)){
+    if(typeof item==='number') (value as Record<string,unknown>)[key]=Number(item.toFixed(5));
+    else stabilizeCoordinates(item,seen);
+  }
+}
 function randomFor(seed: string) {
   let h = 2166136261;
   for (let i = 0; i < seed.length; i++) h = Math.imul(h ^ seed.charCodeAt(i), 16777619);
@@ -94,7 +102,9 @@ export function generatePlan(settings: Settings): Plan {
   const entry={x:gate.start.x+Math.cos(gate.angle)*gx-Math.sin(gate.angle)*gy,y:gate.start.y+Math.sin(gate.angle)*gx+Math.cos(gate.angle)*gy};
   const names=['Ravenwatch','Briarwick','Thornhaven','Eldermere','Ashenford','Wyrmwood','Hollowmere','Greyhaven','Oakenshield','Windrest'];
   const prefix=s.seed===DEFAULT_SETTINGS.seed?'Ravenwatch':names[Math.floor(rnd()*names.length)];
-  return {name:`${prefix} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,floors,vertices,totalArea:floors.reduce((a,f)=>a+f.rooms.reduce((b,r)=>b+r.area,0),0),width:Math.round(maxX-minX),depth:Math.round(maxY-minY),bounds:{x:minX-12,y:minY-14,w:maxX-minX+24,h:maxY-minY+36},entry,entryAngle:gate.angle-Math.PI/2};
+  const plan:Plan={name:`${prefix} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,floors,vertices,totalArea:floors.reduce((a,f)=>a+f.rooms.reduce((b,r)=>b+r.area,0),0),width:Math.round(maxX-minX),depth:Math.round(maxY-minY),bounds:{x:minX-12,y:minY-14,w:maxX-minX+24,h:maxY-minY+36},entry,entryAngle:gate.angle-Math.PI/2};
+  stabilizeCoordinates(plan);
+  return plan;
 }
 export function newSeed(){return `KEEP-${Math.random().toString(36).slice(2,7).toUpperCase()}`;}
 export function roomWorld(room:Room,wing:Wing):Point{return {x:wing.start.x+Math.cos(wing.angle)*(room.x+room.w/2)-Math.sin(wing.angle)*(room.y+room.h/2),y:wing.start.y+Math.sin(wing.angle)*(room.x+room.w/2)+Math.cos(wing.angle)*(room.y+room.h/2)};}
