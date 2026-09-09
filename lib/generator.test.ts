@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { generatePlan, tryGenerate } from './architecture.ts';
-import { DEFAULT_SETTINGS, FAMILIES, insidePolygon, type Settings, type Plan } from './model.ts';
+import { DEFAULT_SETTINGS, FAMILIES, insidePolygon, type Settings, type Plan, type Rect } from './model.ts';
 import { voxelize, prepareMeshes, SparseBlocks } from './voxels.ts';
 import { accessGraph, transitViolations, isCirculation, routeToRoom, navigationReport, articulationPoints } from './navigation.ts';
 
@@ -253,6 +253,40 @@ void test('ordinary rooms keep their proportions: no strip a wing long, nothing 
   assert.ok(counted>500,`only ${counted} ordinary rooms surveyed`);
   assert.ok(worstShape<=3.2,`the longest ordinary room is ${worstShape.toFixed(1)} times its width: ${shape}`);
   assert.ok(worstSize<=760,`the largest ordinary room has taken ${worstSize} blocks: ${size}`);
+});
+void test('the estate composes its open space, and each volume takes its shape from what it houses',()=>{
+  // The defect this answers: every addition drawn as a rectangle of much the same proportions, attached to
+  // a random parent on a random side, with the only outdoor space whatever was left inside the curtain wall.
+  const touches=(a:Rect,b:Rect)=>{
+    const lapZ=Math.min(a.z+a.d,b.z+b.d)-Math.max(a.z,b.z),lapX=Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x);
+    return (lapZ>0&&(a.x+a.w===b.x||b.x+b.w===a.x))||(lapX>0&&(a.z+a.d===b.z||b.z+b.d===a.z));
+  };
+  let plans=0,withYard=0,lodging=0,longRanges=0,towers=0,compact=0;
+  const programmes=new Set<string>();
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind])for(let i=0;i<6;i++){
+    const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size:224,floors:3,seed:`COMPOSE-${i}`});
+    plans++;
+    programmes.add(JSON.stringify(p.components.map(c=>`${c.kind}:${Math.min(3,c.storeys)}`).sort()));
+    const yards=p.components.filter(c=>c.kind==='court');
+    if(yards.length)withYard++;
+    for(const yard of yards){
+      // An open space is part of the composition, which means buildings address it and it is a way through.
+      const walls=p.components.filter(o=>o.id!==yard.id&&touches(yard.bounds,o.bounds)).length;
+      assert.ok(walls>=2,`${family.id}/${i}: ${yard.name} is addressed by ${walls} buildings`);
+      const room=p.rooms.find(r=>r.componentId===yard.id)!;
+      const doors=p.connections.filter(e=>e.includes(room.id)).length;
+      assert.ok(doors>=2,`${family.id}/${i}: ${yard.name} has ${doors} ways in`);
+    }
+    for(const c of p.components){
+      const long=Math.max(c.bounds.w,c.bounds.d),short=Math.min(c.bounds.w,c.bounds.d);
+      if(c.kind==='lodging'){lodging++;if(long>=short*1.5)longRanges++;}
+      if(c.kind==='tower'){towers++;if(long<short*1.25)compact++;}
+    }
+  }
+  assert.ok(withYard/plans>=0.6,`only ${withYard} of ${plans} compositions hold an open yard`);
+  assert.ok(longRanges/Math.max(1,lodging)>=0.6,`only ${longRanges} of ${lodging} lodging ranges are ranges rather than blocks`);
+  assert.ok(compact/Math.max(1,towers)>=0.5,`only ${compact} of ${towers} towers are compact`);
+  assert.ok(programmes.size>=plans*0.5,`only ${programmes.size} distinct building programmes across ${plans} plans`);
 });
 void test('a range deeper than it is wide is walked along its length, not cut into two long strips',()=>{
   // A wing eighty blocks deep and twenty wide cannot be divided by a passage across it: both halves come
