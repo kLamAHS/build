@@ -1,39 +1,88 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DEFAULT_SETTINGS, generatePlan } from './generator.ts';
+import { generatePlan, tryGenerate } from './architecture.ts';
+import { DEFAULT_SETTINGS, FAMILIES, insidePolygon, type Settings, type Plan } from './model.ts';
+import { voxelize, prepareMeshes, SparseBlocks } from './voxels.ts';
 
-test('same seed and settings reproduce geometry, rooms, and floor programs',()=>{
- assert.deepEqual(generatePlan(DEFAULT_SETTINGS),generatePlan({...DEFAULT_SETTINGS}));
- assert.notDeepEqual(generatePlan(DEFAULT_SETTINGS).vertices,generatePlan({...DEFAULT_SETTINGS,seed:'another'}).vertices);
-});
-test('rooms remain usable, finite, and contained across size and character extremes',()=>{
- for(const kind of ['castle','manor','house'] as const)for(const size of [48,64,88,112,120,128,192])for(const organic of [0,65,100])for(let seed=0;seed<50;seed++){
-  const p=generatePlan({...DEFAULT_SETTINGS,kind,size,organic,seed:`case-${seed}`,cellar:seed%2===0,courtyard:seed%2===1});
-  for(const floor of p.floors)for(const w of floor.wings)for(const r of w.rooms){
-   assert.ok(Number.isFinite(r.w)&&r.w>4,`${kind}/${size}/${seed}: invalid width`);
-   assert.ok(Number.isFinite(r.h)&&r.h>3,`${kind}/${size}/${seed}: invalid depth`);
-   assert.ok(r.x>=0&&r.x+r.w<=w.length);
-   assert.ok(r.y>=-w.depth/2&&r.y+r.h<w.depth/2);
-   assert.ok(r.area>0);
-   for(const v of floor.towers.flatMap(t=>t.openings))assert.ok(Number.isFinite(v));
+export const representatives:Settings[]=(['house','manor','castle'] as const).flatMap(kind=>[128,256].flatMap(size=>[0,1,2].map(i=>({...DEFAULT_SETTINGS,kind,size,seed:`REVIEW-${kind}-${size}-${i}`,family:FAMILIES[kind][i].id}))));
+const reference=generatePlan(DEFAULT_SETTINGS);
+function audit(p:Plan){
+  assert.equal(p.validation.valid,true,p.validation.issues.join('; '));
+  assert.equal(p.rooms.filter(r=>r.kind==='hall').length,1);
+  assert.ok(p.rooms.some(r=>r.name.includes('Kitchen'))||p.rooms.some(r=>r.name==='Workshop'));
+  const grid=voxelize(p);
+  for(const door of p.openings.filter(o=>o.type!=='window')){
+    for(let w=0;w<door.width;w++)for(let h=0;h<door.height;h++){
+      const x=door.x+(door.axis==='z'?w:0),z=door.z+(door.axis==='x'?w:0);
+      assert.equal(grid.material(x,door.y+h,z),0,`${p.settings.seed} blocked door ${door.id} (${x},${door.y+h},${z})`);
+    }
+    if(door.type==='door'){
+      const rooms=door.roomIds.map(id=>p.rooms.find(r=>r.id===id)!);
+      for(const r of rooms){const b=r.bounds;assert.ok(door.axis==='x'?(door.x===b.x||door.x===b.x+b.w):(door.z===b.z||door.z===b.z+b.d),`${door.id} is not on a shared wall`);}
+    }
   }
-  assert.equal(p.floors.filter(f=>f.index===0).flatMap(f=>f.rooms).filter(r=>r.kind==='gate').length,1);
- }
+  for(const st of p.stairs){
+    assert.equal(st.toY-st.fromY,6);assert.equal(st.width,2);assert.ok(st.landings.every(l=>l.w>=2&&l.d>=2));
+    for(let j=0;j<6;j++)for(let w=0;w<2;w++){
+      const x=st.bounds.x+3+w,z=st.bounds.z+3+j,y=st.fromY+j+1;
+      assert.ok(grid.material(x,y,z),`Missing tread ${st.id}`);
+      for(let h=1;h<=3;h++)assert.equal(grid.material(x,y+h,z),0,`${p.settings.seed}: blocked headroom ${st.id} at ${x},${y+h},${z}`);
+    }
+    for(const l of st.landings)for(let x=l.x;x<l.x+l.w;x++)for(let z=l.z;z<l.z+l.d;z++){
+      const y=l===st.landings[0]?st.fromY:st.toY;assert.ok(grid.material(x,y,z),`Landing not supported ${st.id}`);
+    }
+  }
+  for(const chimney of p.chimneys){for(let y=chimney.fromY;y<chimney.toY;y++)for(let x=chimney.bounds.x;x<chimney.bounds.x+chimney.bounds.w;x++)for(let z=chimney.bounds.z;z<chimney.bounds.z+chimney.bounds.d;z++)assert.equal(grid.material(x,y,z),8,'Broken chimney stack');}
+  const hall=p.rooms.find(r=>r.kind==='hall')!;
+  for(let y=6;y<hall.ceilingY;y+=6){const b=hall.bounds;for(let x=b.x+2;x<b.x+b.w-1;x++)for(let z=b.z+2;z<b.z+b.d-1;z++){if(p.rooms.some(r=>r.kind==='gallery'&&r.floorY===y&&insidePolygon(x+.5,z+.5,r.polygon)))continue;assert.equal(grid.material(x,y,z),0,`Tall hall filled at Y ${y}`);}}
+  for(const r of p.rooms.filter(r=>r.floorY>0&&r.kind!=='gallery')){
+    const c=p.components.find(c=>c.id===r.componentId)!;
+    assert.ok(r.floorY<c.topY&&c.baseY<r.floorY);
+    assert.ok(p.supports.some(b=>b.componentId===c.id&&b.y===r.floorY-1),`${r.name} lacks a supporting structure`);
+  }
+  for(const r of p.rooms.filter(r=>r.kind==='bedroom'))assert.equal(p.connections.filter(edge=>edge.includes(r.id)).length,1,'A route crosses a bedroom');
+  for(const f of p.floors){
+    const layer=grid.layer(f.elevation+2);let count=0;
+    for(const run of layer.runs)for(let x=run.x;x<run.x+run.length;x++){assert.equal(grid.material(x,layer.y,run.z),run.material);count++;}
+    assert.equal(count,Object.values(layer.counts).reduce((n,c)=>n+c,0));
+  }
+  return grid;
+}
+test('permanent manor: a tall hall, three occupied domestic levels, service end and gallery',()=>{
+  assert.equal(reference.name,'Alderhall Manor');assert.ok(reference.components.some(c=>c.kind==='domestic'&&c.storeys===3));
+  assert.ok(reference.rooms.some(r=>r.kind==='gallery'&&r.floorY===6));assert.ok(reference.floors.find(f=>f.elevation===12)!.voids.length);
+  assert.ok(reference.components.some(c=>c.baseY===0)&&reference.components.some(c=>c.baseY===-6));audit(reference);
 });
-test('levels have aligned stairs and distinct room uses, with optional cellar',()=>{
- const p=generatePlan({...DEFAULT_SETTINGS,floors:5,cellar:true});
- assert.equal(p.floors.length,6);
- for(const f of p.floors)assert.deepEqual(f.towers,p.floors[0].towers);
- assert.notDeepEqual(p.floors[1].rooms.map(r=>r.name),p.floors[2].rooms.map(r=>r.name));
- assert.equal(new Set(p.floors.flatMap(f=>f.rooms.map(r=>r.id))).size,p.floors.flatMap(f=>f.rooms).length);
- assert.equal(p.totalArea,p.floors.flatMap(f=>f.rooms).reduce((n,r)=>n+r.area,0));
+test('18 medium and large representatives have coherent architecture and matching block geometry',()=>{for(const settings of representatives)audit(generatePlan(settings));});
+test('bounded failures report conflicts instead of emitting invalid buildings',()=>{
+  assert.equal(tryGenerate({...DEFAULT_SETTINGS,size:513}).ok,false);assert.equal(tryGenerate({...DEFAULT_SETTINGS,floors:9}).ok,false);assert.equal(tryGenerate({...DEFAULT_SETTINGS,kind:'house',family:'palace'}).ok,false);
 });
-test('larger builds add rooms; chapel and enclosure settings affect layout',()=>{
- for(const kind of ['castle','manor','house'] as const){
-  const a=generatePlan({...DEFAULT_SETTINGS,kind,size:48}),b=generatePlan({...DEFAULT_SETTINGS,kind,size:192});
-  assert.ok(b.width>a.width);assert.ok(b.floors[0].rooms.length>a.floors[0].rooms.length);
- }
- assert.ok(generatePlan(DEFAULT_SETTINGS).floors[0].rooms.some(r=>r.kind==='sacred'));
- assert.ok(generatePlan({...DEFAULT_SETTINGS,chapel:false}).floors[0].rooms.every(r=>r.kind!=='sacred'));
- assert.equal(generatePlan({...DEFAULT_SETTINGS,courtyard:false}).floors[0].wings.length,6);
+test('seed and version determinism, including semantic and voxel operations',()=>{assert.deepEqual(generatePlan(DEFAULT_SETTINGS),reference);assert.equal(reference.schemaVersion,2);assert.equal(reference.generatorVersion,'2.0');});
+test('upper floors change partitions, footprints, occupancy and voids',()=>{
+  const c=reference.components.find(c=>c.kind==='domestic')!;
+  const levels=[0,6,12].map(y=>reference.rooms.filter(r=>r.componentId===c.id&&r.floorY===y));
+  assert.notDeepEqual(levels[0].map(r=>r.bounds),levels[1].map(r=>r.bounds));assert.notDeepEqual(levels[1].map(r=>r.bounds),levels[2].map(r=>r.bounds));
+  const grid=voxelize(reference),hall=reference.rooms.find(r=>r.kind==='hall')!,x=hall.bounds.x+8,z=hall.bounds.z+8;assert.ok(grid.material(x,0,z));assert.equal(grid.material(x,6,z),0);
+});
+test('families and seeds vary component graph and proportions beyond rotations or translations',()=>{
+  const signatures=new Set<string>(),graphs=new Set<string>();
+  for(const kind of ['castle','manor','house'] as const)for(const family of FAMILIES[kind])for(let i=0;i<4;i++){
+    const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,seed:`VARIETY-${i}`,size:160});
+    signatures.add(JSON.stringify(p.components.map(c=>[c.kind,c.bounds.w,c.bounds.d,c.storeys,c.parentId])));
+    graphs.add(JSON.stringify(p.components.map(c=>[c.kind,c.parentId])));
+  }
+  assert.ok(signatures.size>=38,`Only ${signatures.size} distinct compositions`);assert.ok(graphs.size>=15,`Only ${graphs.size} connection graphs`);
+});
+test('compact, maximum storeys and a 512-block site remain sparse and navigable',()=>{
+  for(const kind of ['house','manor','castle'] as const)audit(generatePlan({...DEFAULT_SETTINGS,kind,family:'auto',size:48,floors:1,cellar:false,seed:'COMPACT'}));
+  const start=performance.now(),p=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'double-ward',size:512,floors:8,seed:'LARGEST-512'}),grid=audit(p),meshes=prepareMeshes(grid);
+  assert.ok(p.width<=512&&p.depth<=512);assert.equal(Math.max(...p.rooms.map(r=>r.floorY)),42);assert.ok(grid.stats().bytes<32*1024*1024);assert.ok(meshes.length<240);assert.ok(performance.now()-start<10000,'Largest build exceeded ten seconds');
+  assert.ok(meshes.reduce((n,m)=>n+m.indices.length/3,0)<grid.stats().blocks*8);
+});
+test('greedy exposed faces and layers come from exactly the same occupied cells',()=>{
+  const grid=new SparseBlocks({x:-16,z:-16,w:48,d:48});grid.apply({x:-1,y:0,z:-1,w:3,d:4,h:2,material:1,kind:'wall',componentId:'test'});grid.apply({x:0,y:0,z:0,w:1,d:1,h:2,material:0,kind:'air',componentId:'test'});
+  const mesh=prepareMeshes(grid);let surface=0;
+  for(const m of mesh)for(let i=0;i<m.indices.length;i+=3){const points=[0,1,2].map(k=>{const a=m.indices[i+k]*3;return [m.positions[a],m.positions[a+1],m.positions[a+2]];});const a=points[1].map((n,j)=>n-points[0][j]),b=points[2].map((n,j)=>n-points[0][j]);surface+=Math.hypot(a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0])/2;}
+  let faces=0;for(let x=-1;x<2;x++)for(let z=-1;z<3;z++)for(let y=0;y<2;y++)if(grid.material(x,y,z))for(const [dx,dy,dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]])if(!grid.material(x+dx,y+dy,z+dz))faces++;
+  assert.equal(surface,faces);assert.equal(grid.layer(0).counts[1],11);assert.equal(grid.material(0,0,0),0);
 });
