@@ -53,6 +53,35 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
         issues.push(`The ${o.type} into ${r.name} (${r.componentId}, Y ${r.floorY}) opens onto the well the stair comes up through.`);
   }
   for(const c of plan.chimneys)for(let y=c.fromY;y<c.toY;y++)if(grid.material(c.bounds.x,y,c.bounds.z)!==8)issues.push('A chimney stack is discontinuous.');
+  // Every articulation promises something, and the promise is what is checked. A bay that never opens into
+  // the room it was built for is a buttress with windows in it; a niche that goes through its wall is a hole.
+  for(const a of plan.articulation){
+    if(a.role==='chimney')continue;
+    const b=a.bounds,where=`The ${a.role} at X ${b.x}, Z ${b.z}`;
+    const out=a.side==='n'?{x:0,z:-1}:a.side==='s'?{x:0,z:1}:a.side==='w'?{x:-1,z:0}:{x:1,z:0};
+    if(!plan.rooms.some(r=>a.roomIds.includes(r.id))){issues.push(`${where} is recorded against no room.`);continue;}
+    if(a.role==='niche'){
+      for(let x=b.x;x<b.x+b.w;x++)for(let z=b.z;z<b.z+b.d;z++){
+        if(grid.material(x,a.baseY,z))issues.push(`${where} is not hollow.`);
+        if(!grid.material(x+out.x,a.baseY,z+out.z))issues.push(`${where} goes through its wall instead of into it.`);
+      }
+      continue;
+    }
+    // The wall the projection comes through, the floor it stands on, and the space between the two.
+    const wall=out.z?{axis:'z' as const,at:out.z>0?b.z:b.z+b.d}:{axis:'x' as const,at:out.x>0?b.x:b.x+b.w};
+    let arch=false,floor=false,room=false;
+    for(let x=b.x+1;x<b.x+b.w;x++)for(let z=b.z+1;z<b.z+b.d;z++){
+      if(grid.material(x,a.baseY-1,z))floor=true;
+      if(!grid.material(x,a.baseY+1,z)&&!grid.material(x,a.baseY+2,z))room=true;
+      const cell=wall.axis==='z'?grid.material(x,a.baseY+2,wall.at):grid.material(wall.at,a.baseY+2,z);
+      if(!cell)arch=true;
+    }
+    if(!floor)issues.push(`${where} has no floor to stand on.`);
+    if(!room)issues.push(`${where} projects but encloses nothing.`);
+    if(!arch)issues.push(`${where} never opens into the room it was built for.`);
+    if(a.role==='oriel'&&!plan.blocks.some(k=>k.kind==='support'&&k.y<a.baseY&&k.x<b.x+b.w&&k.x+k.w>b.x&&k.z<b.z+b.d&&k.z+k.d>b.z))
+      issues.push(`${where} hangs over open ground with nothing shown to carry it.`);
+  }
   return [...new Set(issues)];
 }
 function roomRoutes(r:Room,ports:Point[],grid:SparseBlocks){

@@ -10,7 +10,7 @@ export const DIAGNOSTICS:{id:Diagnostic;name:string;hint:string}[]=[
   {id:'off',name:'None',hint:'The finished drawing'},
   {id:'volumes',name:'Volumes',hint:'What was composed, which build each range belongs to, and how far it stands from the hall'},
   {id:'circulation',name:'Circulation',hint:'Every doorway, how many you cross to reach a room, and any forced crossing'},
-  {id:'facade',name:'Facade bays',hint:'The bay lines each wall was divided into, and which took a light'},
+  {id:'facade',name:'Facade bays',hint:'The bay lines each wall was divided into, which took a light, and where the wall steps out of line'},
   {id:'fit',name:'Room fit',hint:'How near each room stands to the proportion and area it is allowed'},
 ];
 export type DrawingOptions={labels:boolean;furniture:boolean;grid:boolean;dimensions:boolean;colors:boolean;diagnostics?:Diagnostic};
@@ -81,6 +81,12 @@ function Diagnostics({plan,floor,mode}:{plan:Plan;floor:Floor;mode:Diagnostic}){
             <line key={`${c.id}z${at}${i}`} x1={x-1.4} y1={at} x2={x+1.4} y2={at} stroke={cut.has(`${at}:x`)?'#2f7a52':'#b06a3a'} strokeWidth=".45"/>)),
           <rect key={`${c.id}p`} x={b.x+l.pier} y={b.z+l.pier} width={Math.max(0,b.w-2*l.pier)} height={Math.max(0,b.d-2*l.pier)} fill="none" stroke="#b06a3a" strokeWidth=".18" strokeDasharray="1 1.6" opacity=".55"/>,
         ];})}
+      {plan.articulation.filter(a=>a.baseY<=y+(a.role==='oriel'?6:2)&&a.topY>y).map(a=>{
+        const b=a.bounds,hue=a.role==='niche'?'#7a5ba8':a.role==='chimney'?'#8a5a2b':'#2f7a52';
+        return <g key={a.id}>
+          <rect x={b.x} y={b.z} width={b.w} height={b.d} fill={`${hue}1f`} stroke={hue} strokeWidth=".3" strokeDasharray={a.baseY===y||a.baseY-2===y?undefined:'1 1'}/>
+          {a.role!=='niche'&&<text x={b.x+b.w/2} y={b.z+b.d+2} fontSize="1.3" textAnchor="middle" fontFamily="ui-monospace,monospace" fill={hue} style={{paintOrder:'stroke',stroke:'#f4eedd',strokeWidth:.55}}>{a.role}</text>}
+        </g>;})}
     </g>;
   }
   return <g pointerEvents="none" fontFamily="ui-monospace,monospace">
@@ -93,6 +99,39 @@ function Diagnostics({plan,floor,mode}:{plan:Plan;floor:Floor;mode:Diagnostic}){
         <text x={r.bounds.x+r.bounds.w/2} y={r.bounds.z+r.bounds.d/2+3.4} fontSize="1.3" textAnchor="middle" fill="#4a3b26" style={{paintOrder:'stroke',stroke:'#f4eedd',strokeWidth:.55}}>{w}×{d} · {aspect.toFixed(1)}:1{ordinary?` · ${Math.round(strain*100)}%`:''}</text>
       </g>;})}
   </g>;
+}
+/**
+ * Where the wall steps out of line, and what it steps out for. A bay is drawn as the room reaching into it,
+ * arch and all, because that is what it is; an oriel is drawn again on the storey below as an overhang on its
+ * corbels, so a projecting room is never a room floating in mid-air; a niche is the shallow inward case.
+ */
+function Articulation({plan,y,colors}:{plan:Plan;y:number;colors:boolean}){
+  return <g>{plan.articulation.map(a=>{
+    if(a.role==='chimney')return null;
+    const room=plan.rooms.find(r=>a.roomIds.includes(r.id));
+    const fill=colors&&room?ROOM_COLORS[room.kind]:'#eee4cd';
+    const b=a.bounds;
+    if(a.role==='niche')return a.baseY-2===y?<rect key={a.id} x={b.x} y={b.z} width={b.w} height={b.d} fill={fill} stroke="#8e8974" strokeWidth=".12"/>:null;
+    if(a.role==='oriel'&&a.baseY===y+6)return <g key={a.id} pointerEvents="none">
+      <rect x={b.x} y={b.z} width={b.w} height={b.d} fill="none" stroke="#8b7f63" strokeWidth=".25" strokeDasharray="1.2 .9"/>
+      {Array.from({length:3},(_,i)=><path key={i} d={a.side==='n'||a.side==='s'?`M${b.x+1.5+i*(b.w-3)/2} ${b.z}v${b.d}`:`M${b.x} ${b.z+1.5+i*(b.d-3)/2}h${b.w}`} stroke="#8b7f63" strokeWidth=".2"/>)}
+      <text x={b.x+b.w/2} y={b.z+b.d/2+.5} fontSize="1.1" textAnchor="middle" fontFamily="Georgia,serif" fontStyle="italic" fill="#8b7f63" style={{paintOrder:'stroke',stroke:'#f5efdf',strokeWidth:.4}}>Oriel over</text>
+    </g>;
+    if(a.baseY!==y)return null;
+    // The arch is painted back into the range so the wall between room and bay reads as open, not as masonry.
+    const arch=a.side==='s'?{x:b.x+1,z:b.z-3,w:b.w-2,d:3}:a.side==='n'?{x:b.x+1,z:b.z+b.d,w:b.w-2,d:3}
+      :a.side==='e'?{x:b.x-3,z:b.z+1,w:3,d:b.d-2}:{x:b.x+b.w,z:b.z+1,w:3,d:b.d-2};
+    // The seat is redrawn here: the room's furniture was laid down before the walls, and the bay covers it.
+    const seats=room?room.furniture.filter(f=>f.type==='seat'&&f.x>=b.x&&f.x<=b.x+b.w&&f.z>=b.z&&f.z<=b.z+b.d):[];
+    return <g key={a.id}>
+      <rect x={b.x+1} y={b.z+1} width={b.w-1} height={b.d-1} fill={fill}/>
+      <rect x={arch.x} y={arch.z} width={arch.w} height={arch.d} fill={fill}/>
+      {seats.map((f,i)=><g key={i} fill="#f6eedb" stroke="#857b66" strokeWidth=".14">
+        <rect x={f.x} y={f.z} width={f.w} height={f.d}/>
+        <path d={f.w>f.d?`M${f.x+.3} ${f.z+f.d/2}h${f.w-.6}`:`M${f.x+f.w/2} ${f.z+.3}v${f.d-.6}`} strokeWidth=".22"/>
+      </g>)}
+    </g>;
+  })}</g>;
 }
 export function preciseSvg(node:ReactNode):ReactNode {return Children.map(node,child=>{if(!isValidElement(child))return child;const el=child as ReactElement<Record<string,unknown>>,props:Record<string,unknown>={};if(typeof el.type==='string')for(const [k,v] of Object.entries(el.props)){if(typeof v==='number'&&Number.isFinite(v))props[k]=Number(v.toFixed(5));else if(typeof v==='string'&&['d','transform','points','viewBox'].includes(k))props[k]=v.replace(/-?\d+(?:\.\d+)?(?:e[-+]?\d+)?/gi,n=>String(Number(Number(n).toFixed(5))));}if(el.props.children!==undefined)props.children=preciseSvg(el.props.children as ReactNode);return cloneElement(el,props);});}
 const polygonPath=(p:Point[])=>p.length?`M${p.map(v=>`${v.x},${v.z}`).join('L')}Z`:'';
@@ -110,6 +149,7 @@ function Furniture({room}:{room:Room}){
       {f.type==='oven'&&<><path d={`M${f.x+.4} ${f.z+f.d-.4}v${-f.d+1.2}a${f.w/2-.4} ${f.w/2-.4} 0 0 1 ${f.w-.8} 0v${f.d-1.2}Z`} fill="#d8ccb2"/><path d={`M${cx} ${f.z+f.d-.4}v${-1}`} strokeWidth=".2"/></>}
       {f.type==='well'&&<><circle cx={cx} cy={cz} r={Math.min(f.w,f.d)/2-.3} fill="#c9d3d6"/><circle cx={cx} cy={cz} r={Math.min(f.w,f.d)/2-.9} fill="#8fa6ab"/></>}
       {f.type==='dais'&&<path d={`M${f.x+.5} ${f.z+f.d-.5}h${f.w-1}`} strokeWidth=".2" strokeDasharray=".7 .5"/>}
+      {f.type==='seat'&&<path d={f.w>f.d?`M${f.x+.3} ${cz}h${f.w-.6}`:`M${cx} ${f.z+.3}v${f.d-.6}`} strokeWidth=".22"/>}
       {f.type==='altar'&&<path d={`M${cx} ${f.z+.3}v${f.d-.6}M${cx-.8} ${f.z+.9}h1.6`} strokeWidth=".2"/>}
     </g>;
   })}</g>;
@@ -137,6 +177,7 @@ export function PlanDrawing({plan,floor,options,selected,onSelect,prefix='plan',
         {!small&&<text x={v.bounds.x+v.bounds.w/2} y={v.bounds.z+v.bounds.d/2} textAnchor="middle" fontFamily="Georgia" fontSize="1.5" fontStyle="italic" fill="#9a8460">{v.name}<tspan x={v.bounds.x+v.bounds.w/2} dy="2">{v.ceilingY} block ceiling</tspan></text>}</g>;})}
     {floor.rooms.map(r=><g key={r.id}><path d={polygonPath(r.polygon)} fill={options.colors?ROOM_COLORS[r.kind]:'#eee4cd'}/><path d={polygonPath(r.polygon)} fill={`url(#${prefix}-wood)`}/>{options.furniture&&<Furniture room={r}/>}</g>)}
     <path d={walls} fill="#707566"/>
+    <Articulation plan={plan} y={y} colors={options.colors}/>
     {plan.openings.filter(o=>o.y<=y+3&&o.y+o.height>y+1).map(o=>{const isX=o.axis==='x',d=o.width;return <g key={o.id}>{!layer&&<rect x={o.x} y={o.z} width={isX?1:d} height={isX?d:1} fill={o.type==='window'?'#b9d5d6':'#ede6d5'}/>}<path d={o.type==='window'?(isX?`M${o.x+.5} ${o.z}v${d}`:`M${o.x} ${o.z+.5}h${d}`):(isX?`M${o.x+.5} ${o.z}h${d}a${d} ${d} 0 0 1 ${-d} ${d}`:`M${o.x} ${o.z+.5}v${d}a${d} ${d} 0 0 0 ${d} ${-d}`)} fill="none" stroke={o.type==='window'?'#597e84':'#8d7c5f'} strokeWidth=".15"/></g>;})}
     {plan.stairs.filter(st=>st.fromY===y||st.toY===y).map(st=>{
       const b=st.bounds,up=st.fromY===y,to=plan.floors.find(f=>f.elevation===(up?st.toY:st.fromY));

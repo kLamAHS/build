@@ -304,7 +304,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   // what stands is simply the one build there ever was, and it is treated as such.
   if(!components.some(c=>c.phase>0))for(const c of components)c.phase=1;
   // Compact budgets keep the same minimum stair and room sizes; optional ranges are omitted.
-  const p:Plan={schemaVersion:2,generatorVersion:'2.0',name:reference?'Alderhall Manor':`${pick(names)}${pick(['wick','mere','ford','haven'])} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,family,components,rooms:[],floors:[],openings:[],stairs:[],chimneys:[],courts:[],routes:[],blocks:[],walls:[],slabs:[],roofs:[],supports:[],bounds:{x:0,z:0,w:0,d:0},minY:s.cellar?-6:0,maxY:0,width:0,depth:0,totalArea:0,entry:{x:0,z:0},connections:[],suites:[],validation:{valid:true,issues:[]},navigation:{maxDepth:0,meanDepth:0,loops:0,unreachable:[],transits:[],strandedRooms:0,compromises:0,score:0},composition:{volumes:0,reach:0,spread:0,yards:0,hierarchy:0,frontage:0,score:0},signature:''};
+  const p:Plan={schemaVersion:2,generatorVersion:'2.0',name:reference?'Alderhall Manor':`${pick(names)}${pick(['wick','mere','ford','haven'])} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,family,components,rooms:[],floors:[],openings:[],stairs:[],chimneys:[],articulation:[],courts:[],routes:[],blocks:[],walls:[],slabs:[],roofs:[],supports:[],bounds:{x:0,z:0,w:0,d:0},minY:s.cellar?-6:0,maxY:0,width:0,depth:0,totalArea:0,entry:{x:0,z:0},connections:[],suites:[],validation:{valid:true,issues:[]},navigation:{maxDepth:0,meanDepth:0,loops:0,unreachable:[],transits:[],strandedRooms:0,compromises:0,score:0},composition:{volumes:0,reach:0,spread:0,yards:0,hierarchy:0,frontage:0,score:0},signature:''};
   function room(c:BuildingComponent,name:string,kind:RoomKind,bounds:Rect,y:number,ceiling=y+6,shape:RoomShape='rect',shapeSide:'n'|'s'|'e'|'w'='e',notch?:Rect,corners?:DaisCorners){
     const envelope=c.kind==='tower'?c.polygon:rectPolygon(componentFootprint(c,y,family));
     const polygon=shape==='rect'?clipPolygon(envelope,bounds):clipPolygon(shapePolygon(bounds,shape,shapeSide,notch,corners),componentFootprint(c,y,family));
@@ -1508,6 +1508,156 @@ function buildGeometry(p:Plan){
       }
     }
   }
+  // ---- Articulation. A wall that runs corner to corner without once stepping out of line is a diagram of a
+  // building rather than a building. Where a principal room has the ground for it, the wall steps out into a
+  // bay: a projection with a reason recorded against it, opened through to the room it lights and furnished
+  // with the seat that is the point of it. On an upper storey the same thing hangs on corbels as an oriel,
+  // and the storey below is given what carries it rather than a room floating in mid-air. Restraint is the
+  // rule: a hall with one bay reads as a hall with a bay, and a house where every room has one reads as a
+  // house with none, so ordinary rooms stay ordinary and the budget is spent on the few that are not.
+  const BAY_RANK:Partial<Record<RoomKind,number>>={hall:4,gallery:3,study:2,bedroom:1};
+  const bayBudget=1+(p.settings.size>200?1:0)+(p.settings.size>340?1:0);
+  // Ground a projection may not stand on: the path from the gate, and the band a curtain wall occupies.
+  const pathCells=new Set<string>();
+  for(const route of p.routes)for(let i=1;i<route.points.length;i++){
+    const a=route.points[i-1],b=route.points[i],steps=Math.max(Math.abs(b.x-a.x),Math.abs(b.z-a.z));
+    for(let j=0;j<=steps;j++){
+      const t=steps?j/steps:0,x=Math.round(a.x+(b.x-a.x)*t),z=Math.round(a.z+(b.z-a.z)*t);
+      for(let dx=-2;dx<=route.width+1;dx++)for(let dz=-2;dz<=route.width+1;dz++)pathCells.add(`${x+dx},${z+dz}`);
+    }
+  }
+  const taken:Rect[]=[];
+  /** Whether a projection can stand here: off every other range and its mass, off the path, off the curtain. */
+  const standable=(r:Rect,own:BuildingComponent,hangs=false)=>{
+    if(taken.some(o=>intersects(o,r)))return false;
+    // An oriel hangs over open ground. One over the roof of the storey below it is a room in mid-air.
+    if(hangs&&intersects(own.bounds,r))return false;
+    if(p.components.some(o=>o.kind!=='court'&&o.id!==own.id&&intersects({x:o.bounds.x-shell,z:o.bounds.z-shell,w:o.bounds.w+2*shell,d:o.bounds.d+2*shell},r)))return false;
+    if(p.courts.some(ct=>{const b=ct.bounds,t=ct.thickness+2;
+      return intersects({x:b.x-2,z:b.z-2,w:b.w+4,d:b.d+4},r)&&!(r.x>b.x+t&&r.x+r.w<b.x+b.w-t&&r.z>b.z+t&&r.z+r.d<b.z+b.d-t);}))return false;
+    if(p.courts.some(ct=>ct.yards.some(yd=>intersects(yd.bounds,r))))return false;
+    // A projection stands on the wall it comes out of, so a doorway anywhere under it would be walled up.
+    for(let x=r.x-1;x<=r.x+r.w+1;x++)for(let z=r.z-1;z<=r.z+r.d+1;z++)
+      if(pathCells.has(`${x},${z}`)||doorCells.has(`${x},${z}`))return false;
+    return true;
+  };
+  type Bay={c:BuildingComponent;room:Room;side:'n'|'s'|'e'|'w';rect:Rect;at:number;wide:number;proud:number};
+  const wanted:Bay[]=[];
+  for(const room of p.rooms){
+    const worth=BAY_RANK[room.kind];
+    if(worth===undefined||room.floorY<0)continue;
+    const c=p.components.find(x=>x.id===room.componentId)!;
+    if(c.kind==='court'||c.polygon.length>4)continue;
+    const fo=componentFootprint(c,room.floorY,p.family),rb=room.bounds;
+    // How far the bay stands proud of the outer face of the wall. Its footprint has to swallow the wall it
+    // comes through as well, or the mass of the range would fill the space the bay was built to give.
+    const wide=room.kind==='hall'?7:5,proud=room.kind==='hall'?4:3,deep=shellOf(c)-1+proud;
+    for(const side of ['s','e','w','n'] as const){
+      const across=side==='n'||side==='s';
+      const edge=side==='n'?fo.z:side==='s'?fo.z+fo.d:side==='w'?fo.x:fo.x+fo.w;
+      if((side==='n'?rb.z:side==='s'?rb.z+rb.d:side==='w'?rb.x:rb.x+rb.w)!==edge)continue;
+      const lo=across?rb.x:rb.z,hi=across?rb.x+rb.w:rb.z+rb.d;
+      if(hi-lo<wide+4)continue;
+      const mid=Math.floor((lo+hi)/2),lines=bayLines(c,p.settings.kind==='castle');
+      // On a bay line where there is one, on the room's own centre where the rhythm has nothing to offer.
+      const spots=[...(across?lines.x:lines.z).filter(at=>at-wide/2>lo+1&&at+wide/2<hi-1),mid];
+      const outward=side==='n'||side==='w'?-1:1;
+      for(const at of spots){
+        const start=at-Math.floor(wide/2),near=outward>0?edge:edge-deep;
+        const rect:Rect=across?{x:start,z:near,w:wide,d:deep}:{x:near,z:start,w:deep,d:wide};
+        // The whole width of the opening has to belong to this one room, with a pier of its wall either side.
+        let solid=true;
+        for(let w=-1;w<=wide+1;w++){
+          const inner=across?{x:start+w+.5,z:edge+(outward>0?-.5:1.5)}:{x:edge+(outward>0?-.5:1.5),z:start+w+.5};
+          if(!holds(room,inner.x,inner.z)){solid=false;break;}
+        }
+        if(!solid||!standable(rect,c,room.floorY>0))continue;
+        wanted.push({c,room,side,rect,at,wide,proud});
+        break;
+      }
+    }
+  }
+  // The hall first, then the largest of what is left: a bay is worth spending where the household gathers.
+  wanted.sort((a,b)=>BAY_RANK[b.room.kind]!-BAY_RANK[a.room.kind]!||b.room.area-a.room.area||(a.room.id<b.room.id?-1:1));
+  const bayRooms=new Set<string>(),bayOpenings=new Set<string>();
+  for(const {c,room,side,rect,wide,proud} of wanted){
+    if(p.articulation.length>=bayBudget)break;
+    if(bayRooms.has(room.id)||!standable(rect,c,room.floorY>0))continue;
+    bayRooms.add(room.id);taken.push(rect);
+    const across=side==='n'||side==='s',outward=side==='n'||side==='w'?-1:1,y=room.floorY;
+    const fo=componentFootprint(c,y,p.family);
+    const edge=side==='n'?fo.z:side==='s'?fo.z+fo.d:side==='w'?fo.x:fo.x+fo.w;
+    const oriel=y>0;
+    // A bay is a frame of mullions rather than a curtain of masonry, so beyond the wall it comes through its
+    // own walls stay one block even where the range behind is three: that lightness is what makes it a bay
+    // rather than a turret.
+    box(rect,y-1,1,1,'floor',c.id);
+    outline(rectPolygon(rect),y,6,1,'wall',c.id);
+    box(rect,y+6,1,3,'roof',c.id);
+    if(oriel){
+      // What carries an oriel is drawn, not assumed: a stepped corbel course under the floor it hangs from.
+      box({x:rect.x+1,z:rect.z+1,w:rect.w-2,d:rect.d-2},y-2,1,1,'support',c.id);
+      box(rect,y-1,1,1,'support',c.id);
+    }else box(rect,-1,1,1,'support',c.id);
+    // The arch through to the room: the point of a bay is that the room reaches into it, so the wall is taken
+    // out over the bay's whole interior width and through its whole thickness, leaving the returns as piers.
+    const span=wide-1,from=(across?rect.x:rect.z)+1;
+    const opened=new Set<string>();
+    for(let step=0;step<shellOf(c);step++)for(let w=0;w<span;w++){
+      const x=across?from+w:edge+outward*step,z=across?edge+outward*step:from+w;
+      box({x,z,w:1,d:1},y+1,4,0,'air',c.id);opened.add(`${x},${z}`);
+    }
+    // A light that stood in the wall the arch now goes through would be a window into the bay's own floor.
+    p.openings=p.openings.filter(o=>!Array.from({length:o.width},(_,w)=>`${o.x+(o.axis==='z'?w:0)},${o.z+(o.axis==='x'?w:0)}`).some(k=>opened.has(k)));
+    // Lit on three sides, which is the other half of why a bay is worth building. The face is the wall
+    // furthest from the range; a return is lit only where it stands clear of the wall the bay comes through.
+    const face=outward>0?(across?rect.z+rect.d:rect.x+rect.w):(across?rect.z:rect.x);
+    const clear=outward>0?edge+outward*shellOf(c):edge-shellOf(c)-proud+2;
+    const light=(o:Opening)=>{bayOpenings.add(o.id);p.openings.push(o);};
+    light({id:`w${p.openings.length}`,type:'window',axis:across?'z':'x',
+      x:across?from+1:face,z:across?face:from+1,y:y+2,width:wide-3,height:4,roomIds:[room.id]});
+    for(const end of [0,wide]){
+      const x=across?rect.x+end:clear,z=across?clear:rect.z+end;
+      light({id:`w${p.openings.length}`,type:'window',axis:across?'x':'z',x,z,y:y+2,width:proud-1,height:3,roomIds:[room.id]});
+    }
+    // The seat is what a bay is for. It sits in the projection, against the light, facing back into the room.
+    const along=(across?rect.x:rect.z)+2,run=wide-3;
+    const seat:Rect=across?{x:along,z:outward>0?rect.z+rect.d-1:rect.z+1,w:run,d:1}:{x:outward>0?rect.x+rect.w-1:rect.x+1,z:along,w:1,d:run};
+    room.furniture.push({...seat,y,h:1,type:'seat',material:9});
+    p.articulation.push({id:`a${p.articulation.length}`,role:oriel?'oriel':'bay',componentId:c.id,roomIds:[room.id],
+      bounds:rect,side,baseY:y,topY:y+6,reason:`${oriel?'An oriel':'A bay'} lighting and seating the ${room.name.toLowerCase()}`});
+  }
+  // A wall thick enough to give one away takes a niche: a recess for a lamp or an image, cut from the inside
+  // face and stopping well short of daylight. Only the rooms that would have been given one, and only a few.
+  const nicheRooms=p.rooms.filter(r=>['hall','sacred','gallery'].includes(r.kind)&&r.floorY>=0);
+  for(const room of nicheRooms){
+    if(p.articulation.filter(a=>a.role==='niche').length>=4)break;
+    const c=p.components.find(x=>x.id===room.componentId)!;
+    if(c.kind==='court'||c.polygon.length>4||shellOf(c)<3)continue;
+    const fo=componentFootprint(c,room.floorY,p.family),rb=room.bounds,y=room.floorY;
+    let cut=0;
+    for(const side of ['n','s','e','w'] as const){
+      if(cut>=2)break;
+      const across=side==='n'||side==='s';
+      const edge=side==='n'?fo.z:side==='s'?fo.z+fo.d:side==='w'?fo.x:fo.x+fo.w;
+      if((side==='n'?rb.z:side==='s'?rb.z+rb.d:side==='w'?rb.x:rb.x+rb.w)!==edge)continue;
+      const outward=side==='n'||side==='w'?-1:1;
+      const lo=across?rb.x:rb.z,hi=across?rb.x+rb.w:rb.z+rb.d,at=Math.floor((lo+hi)/2)-1;
+      if(hi-lo<8)continue;
+      const cells=[at,at+1].map(n=>across?{x:n,z:edge}:{x:edge,z:n});
+      // Never into a doorway, never where a light already is, never beside a projection whose arch has
+      // already taken the wall away behind it, and only where the wall has the mass to spare.
+      const near=(k:Point)=>taken.some(t=>k.x>=t.x-1&&k.x<=t.x+t.w+1&&k.z>=t.z-1&&k.z<=t.z+t.d+1);
+      if(cells.some(k=>doorCells.has(`${k.x},${k.z}`)||near(k)))continue;
+      if(!cells.every(k=>thickened.has(`${k.x+(across?0:outward)},${k.z+(across?outward:0)}`)))continue;
+      if(p.openings.some(o=>cells.some(k=>Array.from({length:o.width},(_,w)=>`${o.x+(o.axis==='z'?w:0)},${o.z+(o.axis==='x'?w:0)}`).includes(`${k.x},${k.z}`))))continue;
+      for(const k of cells)box({x:k.x,z:k.z,w:1,d:1},y+2,3,0,'air',c.id);
+      const bounds:Rect=across?{x:at,z:edge,w:2,d:1}:{x:edge,z:at,w:1,d:2};
+      p.articulation.push({id:`a${p.articulation.length}`,role:'niche',componentId:c.id,roomIds:[room.id],
+        bounds,side,baseY:y+2,topY:y+5,reason:`A recess in the thickness of the ${room.name.toLowerCase()} wall`});
+      cut++;
+    }
+  }
   // An opening is cut through the whole thickness of its wall: a door becomes a passage and a window a
   // reveal, rather than a hole in the inner face with masonry still standing behind it.
   const jamb=(o:Opening,step:number)=>Array.from({length:o.width},(_,w)=>o.axis==='x'?{x:o.x+step,z:o.z+w}:{x:o.x+w,z:o.z+step});
@@ -1515,6 +1665,8 @@ function buildGeometry(p:Plan){
     const material=o.type==='window'?4:0,kind=o.type==='window'?'glass':'air' as const;
     const id=p.rooms.find(r=>r.id===o.roomIds[0])!.componentId;
     box({x:o.x,z:o.z,w:o.axis==='x'?1:o.width,d:o.axis==='z'?1:o.width},o.y,o.height,material,kind,id);
+    // A bay's own lights stand in a wall one block thick; carrying them further would glaze the range behind.
+    if(bayOpenings.has(o.id))continue;
     for(const dir of [1,-1])for(let step=dir;Math.abs(step)<shell;step+=dir){
       const cells=jamb(o,step);
       if(!cells.every(c=>thickened.has(`${c.x},${c.z}`)))break;
@@ -1536,18 +1688,25 @@ function buildGeometry(p:Plan){
     // A stack belongs over a fire. Where a hearth or an oven backs onto an outside wall, the flue rises
     // against that wall and in line with it; only a range whose fires are all internal takes a stack on the
     // first free corner instead.
-    const stacks:Rect[]=[];
-    for(const f of p.rooms.filter(r=>r.componentId===c.id&&r.floorY===0).flatMap(r=>r.furniture.filter(fu=>fu.type==='hearth'||fu.type==='oven'))){
-      if(f.x<=b.x+2)stacks.push({x:b.x-2,z:f.z,w:2,d:Math.max(2,f.d)});
-      else if(f.x+f.w>=b.x+b.w-2)stacks.push({x:b.x+b.w+1,z:f.z,w:2,d:Math.max(2,f.d)});
-      else if(f.z<=b.z+2)stacks.push({x:f.x,z:b.z-2,w:Math.max(2,f.w),d:2});
-      else if(f.z+f.d>=b.z+b.d-2)stacks.push({x:f.x,z:b.z+b.d+1,w:Math.max(2,f.w),d:2});
+    const stacks:[Rect,Room,'n'|'s'|'e'|'w'][]=[];
+    for(const r of p.rooms.filter(r=>r.componentId===c.id&&r.floorY===0))for(const f of r.furniture){
+      if(f.type!=='hearth'&&f.type!=='oven')continue;
+      if(f.x<=b.x+2)stacks.push([{x:b.x-2,z:f.z,w:2,d:Math.max(2,f.d)},r,'w']);
+      else if(f.x+f.w>=b.x+b.w-2)stacks.push([{x:b.x+b.w+1,z:f.z,w:2,d:Math.max(2,f.d)},r,'e']);
+      else if(f.z<=b.z+2)stacks.push([{x:f.x,z:b.z-2,w:Math.max(2,f.w),d:2},r,'n']);
+      else if(f.z+f.d>=b.z+b.d-2)stacks.push([{x:f.x,z:b.z+b.d+1,w:Math.max(2,f.w),d:2},r,'s']);
     }
-    const sides=[{x:b.x-2,z:b.z+3,w:2,d:3},{x:b.x+b.w+1,z:b.z+3,w:2,d:3},{x:b.x+3,z:b.z-2,w:3,d:2},{x:b.x+3,z:b.z+b.d+1,w:3,d:2}];
-    const chimney=[...stacks,...sides].find(r=>!p.components.some(other=>intersects(other.bounds,r)));
-    if(!chimney)continue;
+    const sides=([[{x:b.x-2,z:b.z+3,w:2,d:3},'w'],[{x:b.x+b.w+1,z:b.z+3,w:2,d:3},'e'],[{x:b.x+3,z:b.z-2,w:3,d:2},'n'],[{x:b.x+3,z:b.z+b.d+1,w:3,d:2},'s']] as [Rect,'n'|'s'|'e'|'w'][]).map(([r,side])=>[r,undefined,side] as [Rect,Room|undefined,'n'|'s'|'e'|'w']);
+    // A stack is a projection like any other: it stands clear of the ranges and of anything already built out.
+    const found=[...stacks,...sides].find(([r])=>!p.components.some(other=>intersects(other.bounds,r))&&!taken.some(o=>intersects(o,r))
+      &&!Array.from({length:(r.w+2)*(r.d+2)},(_,i)=>`${r.x-1+i%(r.w+2)},${r.z-1+Math.floor(i/(r.w+2))}`).some(k=>doorCells.has(k)));
+    if(!found)continue;
+    const [chimney,over,side]=found;
     const toY=c.topY+Math.ceil(Math.min(b.w,b.d)/2)+4;
+    taken.push(chimney);
     p.chimneys.push({bounds:chimney,fromY:c.baseY,toY,componentId:c.id});box(chimney,c.baseY,toY-c.baseY,8,'chimney',c.id);
+    p.articulation.push({id:`a${p.articulation.length}`,role:'chimney',componentId:c.id,roomIds:over?[over.id]:[],
+      bounds:chimney,side,baseY:c.baseY,topY:toY,reason:over?`The flue of the fire in the ${over.name.toLowerCase()}`:'A stack for the fires of this range'});
   }
   const e=p.openings.find(o=>o.type==='entrance')!,out=e.outward!;box({x:e.x+(out.x>0?1:out.x<0?-7:0),z:e.z+(out.z>0?1:out.z<0?-7:0),w:e.axis==='x'?7:2,d:e.axis==='z'?7:2},-1,1,6,'ground');
   if(p.settings.garden){

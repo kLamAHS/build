@@ -288,8 +288,13 @@ void test('a wall is divided into bays before anything is cut into it',()=>{
     const doors=new Set(p.openings.filter(o=>o.type!=='window').flatMap(o=>
       Array.from({length:o.width},(_,w)=>`${o.x+(o.axis==='z'?w:0)},${o.z+(o.axis==='x'?w:0)}`)));
     const bays=new Map<string,number[]>();
+    // A light in a projection stands in the bay's own wall, not in the room's, so the pier rule is not its rule.
+    const projected=(o:{x:number;z:number;width:number;axis:string})=>p.articulation.some(a=>a.role!=='niche'
+      &&Array.from({length:o.width},(_,w)=>({x:o.x+(o.axis==='z'?w:0),z:o.z+(o.axis==='x'?w:0)}))
+        .some(k=>k.x>=a.bounds.x-1&&k.x<=a.bounds.x+a.bounds.w+1&&k.z>=a.bounds.z-1&&k.z<=a.bounds.z+a.bounds.d+1));
     for(const o of p.openings.filter(o=>o.type==='window')){
       windows++;forms.add(`${o.width}x${o.height}`);
+      if(projected(o))continue;
       const room=byId.get(o.roomIds[0])!;
       const across=o.axis==='z';
       // A pier either side: the wall cell beyond each end of the light belongs to the same room behind it.
@@ -535,10 +540,13 @@ void test('a retained core is heavier than what was built against it',()=>{
     // How far a range's masonry is carried outward past the footprint it was cut with.
     const plain=p.components.filter(c=>c.kind!=='court'&&c.polygon.length===4);
     const mass=new Map(plain.map(c=>[c.phase,0]));
+    const projecting=p.articulation.filter(a=>a.role!=='niche').map(a=>a.bounds);
     for(const c of plain){
       let out=0;
       for(const b of p.blocks){
         if(b.componentId!==c.id||b.kind!=='wall')continue;
+        // A bay stands proud of the wall on purpose; it is articulation, not the mass of the wall itself.
+        if(projecting.some(r=>b.x>=r.x-1&&b.x<=r.x+r.w+1&&b.z>=r.z-1&&b.z<=r.z+r.d+1))continue;
         out=Math.max(out,c.bounds.x-b.x,b.x-(c.bounds.x+c.bounds.w),c.bounds.z-b.z,b.z-(c.bounds.z+c.bounds.d));
       }
       mass.set(c.phase,Math.max(mass.get(c.phase)??0,out));
@@ -553,4 +561,66 @@ void test('a retained core is heavier than what was built against it',()=>{
   assert.ok(single>8,`only ${single} of ${settings.length} seats were raised in one campaign`);
   assert.ok(heavier>=inherited*.8,`only ${heavier} of ${inherited} retained cores are heavier than their later ranges`);
   assert.ok(coarser>=inherited*.8,`only ${coarser} of ${inherited} retained cores take a coarser rhythm`);
+});
+
+void test('a projection has a reason, and keeps the promise the reason makes',()=>{
+  // The defect this answers: walls that ran corner to corner without once stepping out of line, and the
+  // only things that ever stood proud of one — a chimney, a tower — carrying no record of why they did.
+  let seats=0,arches=0,carried=0,rooms=0,projections=0;
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    const tag=settings.seed;
+    const grid=voxelize(p);
+    rooms+=p.rooms.length;
+    assert.ok(p.articulation.length,`${tag}: nothing on this estate steps out of line`);
+    for(const a of p.articulation){
+      assert.ok(a.reason.length>10,`${tag}: ${a.role} at ${a.bounds.x},${a.bounds.z} carries no reason`);
+      const c=p.components.find(x=>x.id===a.componentId);
+      assert.ok(c,`${tag}: ${a.role} belongs to no range`);
+      if(a.role==='chimney')continue;
+      if(a.role==='niche'){
+        // A niche is the inward case: it sits in the wall of its room and stops short of daylight.
+        const room=p.rooms.find(r=>a.roomIds.includes(r.id))!;
+        assert.ok(['hall','sacred','gallery'].includes(room.kind),`${tag}: a niche in the ${room.kind}`);
+        assert.ok(a.bounds.w*a.bounds.d<=2,`${tag}: a niche ${a.bounds.w} by ${a.bounds.d} is a chamber`);
+        continue;
+      }
+      projections++;
+      const room=p.rooms.find(r=>a.roomIds.includes(r.id))!;
+      assert.ok(['hall','gallery','study','bedroom'].includes(room.kind),`${tag}: a bay off the ${room.kind}`);
+      assert.equal(room.floorY>0,a.role==='oriel',`${tag}: ${a.role} on floor ${room.floorY}`);
+      // It stands proud of the range: part of its footprint is outside the walls it comes through.
+      const b=a.bounds;
+      assert.ok(b.x<c!.bounds.x||b.z<c!.bounds.z||b.x+b.w>c!.bounds.x+c!.bounds.w||b.z+b.d>c!.bounds.z+c!.bounds.d,
+        `${tag}: the ${a.role} for ${room.name} does not project`);
+      // It opens into the room it was built for, and there is a way through at head height.
+      let open=false;
+      for(let x=b.x+1;x<b.x+b.w;x++)for(let z=b.z+1;z<b.z+b.d;z++)if(!grid.material(x,a.baseY+2,z))open=true;
+      assert.ok(open,`${tag}: the ${a.role} for ${room.name} is solid`);
+      arches++;
+      // The seat is the point of it, and it is in the projection rather than somewhere in the room.
+      const seat=room.furniture.find(f=>f.type==='seat'&&f.x>=b.x&&f.x<=b.x+b.w&&f.z>=b.z&&f.z<=b.z+b.d);
+      assert.ok(seat,`${tag}: the ${a.role} for ${room.name} has no seat in it`);
+      seats++;
+      if(a.role==='oriel'){
+        // What carries an oriel is drawn on the storey below rather than left to the reader's charity.
+        assert.ok(p.blocks.some(k=>k.kind==='support'&&k.y<a.baseY&&k.x<b.x+b.w&&k.x+k.w>b.x&&k.z<b.z+b.d&&k.z+k.d>b.z),
+          `${tag}: the oriel for ${room.name} hangs on nothing`);
+        carried++;
+      }
+    }
+    // Two projections may not want the same ground, and none may stand on a range.
+    for(let i=0;i<p.articulation.length;i++)for(let j=i+1;j<p.articulation.length;j++){
+      const a=p.articulation[i],b=p.articulation[j];
+      if(a.role==='niche'||b.role==='niche')continue;
+      assert.ok(!intersects(a.bounds,b.bounds),`${tag}: the ${a.role} and the ${b.role} want the same ground`);
+    }
+    assert.deepEqual(auditArchitecture(p,grid),[],`${tag}: the audit rejects this plan`);
+  }
+  assert.ok(projections>=representatives.length,`only ${projections} projections across ${representatives.length} estates`);
+  assert.equal(arches,projections);
+  assert.equal(seats,projections);
+  assert.ok(carried>0,'no oriel anywhere, so the overhang convention is never exercised');
+  // Restraint is the rule: repeated ordinary rooms are what make the exceptions read as exceptions.
+  assert.ok(projections/rooms<.05,`${projections} projections for ${rooms} rooms is not restraint`);
 });

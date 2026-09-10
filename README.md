@@ -44,8 +44,8 @@ toolbar or by passing `diagnostics` to `PlanDrawing`.
   the number of doors from the entrance, circulation and destinations coloured apart, and any room a
   household is forced to cross ringed in red.
 - **Facade bays** — the bay lines each wall was divided into, green where the bay took a light and orange
-  where it was refused, with the corner piers marked. This is where a missing window is either a bay that
-  was never there or a bay something stood in the way of.
+  where it was refused, with the corner piers marked, and every projection outlined and named by its role.
+  This is where a missing window is either a bay that was never there or a bay something stood in the way of.
 - **Room fit** — every room tinted by how near it stands to the proportion and area the audit will reject it
   at, and labelled with its dimensions and aspect. This is the room-cutting stage.
 
@@ -241,6 +241,43 @@ all, which is a massing question rather than a window one.
 A chimney now rises over a fire. Where a hearth or an oven backs onto an outside wall the flue stands against
 that wall and in line with it; only a range whose fires are all internal takes a stack on the first free
 corner instead.
+
+## Articulation: what steps out of line, and why
+
+Every wall ran corner to corner without once stepping out of line, and the only things that ever stood proud
+of one — a chimney, a tower — carried no record of why they did.
+
+`Plan.articulation` is now a list of every place a wall does something other than run straight, each with the
+role it plays and the reason it is there. Whole projecting volumes — a tower, a chapel end, a gatehouse porch
+— carry their role in `ComponentKind` already and are not repeated in it.
+
+- **Bay.** Where a principal room has the ground for it, the wall steps out. The bay's footprint swallows the
+  wall it comes through as well as the space it gives, so that the mass of the range does not eat the room the
+  bay was built to make. The wall is then taken out over the bay's whole interior width and through its whole
+  thickness, leaving the bay's returns as the piers of the arch — the point of a bay is that the room reaches
+  into it. It is lit on three sides, and beyond the wall its own walls stay one block even where the range
+  behind is three: that lightness is what makes it a bay rather than a turret.
+- **Oriel.** The same thing on an upper storey, hanging over open ground. What carries it is drawn rather than
+  assumed — a stepped corbel course under the floor it hangs from — and the storey below shows the overhang
+  dashed, with its corbels and the caption *Oriel over*, instead of a room in mid-air.
+- **Chimney.** The stack over a fire, which was already built but never recorded. Its reason names the fire.
+- **Niche.** The inward case: a recess for a lamp or an image, cut into a wall thick enough to give one away —
+  a castle's, or a retained core's — and stopping well short of daylight.
+
+The role is what the audit checks, so a projection that does not do what it claims is a rejected candidate
+rather than a decoration. A bay must have a floor to stand on, must enclose something, and must open into the
+room it is recorded against; an oriel must have something under it; a niche must be hollow and must *not* go
+through its wall. Nothing is placed over a doorway, over the path from the gate, on a curtain wall, in a
+working yard, or on ground another projection has already taken.
+
+Restraint is the rule. A hall with one bay reads as a hall with a bay; a house where every room has one reads
+as a house with none. The budget is one projection, two past 200 blocks and three past 340, spent on the hall
+first and then on the largest of what is left. Across the 960-setting sweep that comes to 1,183 bays, 367
+oriels and 694 niches: 950 of 960 estates have at least one, the hall gets one in 610 of them, and projections
+account for 1.8% of all rooms.
+
+A bay's seat is furniture like any other, so it is drawn, exported and voxelised with the rest — a bay window
+without a window seat is a corridor with a view.
 
 ## The courtyard castle
 
