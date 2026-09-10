@@ -106,6 +106,23 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
     if(v.kind==='hall'&&r.kind!=='gallery')issues.push(`${where}, which only a gallery may overlook.`);
     if(v.kind==='stair'&&r.kind!=='stairs'&&r.kind!=='circulation')issues.push(`${where}, which is the well a flight comes up through.`);
     if(v.kind==='court'&&r.kind!=='court'&&!carried(r.bounds))issues.push(`${where}, which is open to the sky.`);
+    if(v.kind==='loggia'&&r.kind!=='circulation')issues.push(`${where}, which is a covered walk and not a room.`);
+  }
+  // A loggia is covered overhead and open down one side. Lose either and it is a corridor or a colonnade.
+  for(const v of plan.reservations.filter(v=>v.kind==='loggia')){
+    const b=v.bounds,mid={x:b.x+Math.floor(b.w/2),z:b.z+Math.floor(b.d/2)};
+    // Covered means roofed, not floored: a walk under the rafters of a single-storey range is still covered,
+    // so the test is that something stands over it somewhere in the roof above rather than at one height.
+    let covered=false;
+    for(let y=v.toY;y<=v.toY+14&&!covered;y++)if(grid.material(mid.x,y,mid.z))covered=true;
+    if(!covered)issues.push(`${v.name} has nothing over it, so it is a yard and not a loggia.`);
+    if(!v.side)continue;
+    const across=v.side==='n'||v.side==='s';
+    const edge=v.side==='n'?b.z:v.side==='s'?b.z+b.d:v.side==='w'?b.x:b.x+b.w;
+    const from=across?b.x:b.z,run=across?b.w:b.d;
+    let open=0;
+    for(let i=1;i<run;i++)if(!grid.material(across?from+i:edge,v.fromY+2,across?edge:from+i))open++;
+    if(open*2<run)issues.push(`${v.name} is open along ${open} of ${run} blocks, which is a wall with holes rather than an arcade.`);
   }
   // Every occupied upper room is carried by something: the storey below it, or a cantilever that says so.
   for(const r of plan.rooms){

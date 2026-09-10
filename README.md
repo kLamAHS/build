@@ -266,11 +266,14 @@ than discovering them. The three conditions are kept apart because they are not 
 
 - a **court** is open exterior for its whole height, which is as far up as the ranges around it stand;
 - a **hall** is interior volume with no floor carried across it, from the first floor to the top of the hall;
-- a **stair** well is the hole one storey leaves in the next, for the flight that comes up through it.
+- a **stair** well is the hole one storey leaves in the next, for the flight that comes up through it;
+- a **loggia** is covered overhead but open to the weather down one side.
 
 Each reservation names the exception it allows. A gallery may overlook a hall; a chamber may not be dropped
 into one. A stair well takes stairs and circulation and nothing else. A yard takes nothing at all unless a
-cantilever says otherwise. The audit enforces that, and a floor's voids are no longer worked out by the
+cantilever says otherwise. A loggia takes the covered walk it exists for, and must actually be both covered
+and open: it is checked for a roof somewhere above it and for an outer side that is arcade along more than
+half its length, with piers still standing between the bays. The audit enforces that, and a floor's voids are no longer worked out by the
 drawing — they are the reservations that reach that level, so a hole in the boards is always the volume
 something else was given. Across the 960-setting sweep that comes to a hall void in every estate that has a
 hall of more than one storey, 830 stair wells and 159 reserved yards in a 108-plan slice.
@@ -408,6 +411,22 @@ account for 1.8% of all rooms.
 
 A bay's seat is furniture like any other, so it is drawn, exported and voxelised with the rest — a bay window
 without a window seat is a corridor with a view.
+
+## The covered walk
+
+A courtyard range's walk used to be a corridor with doors onto the yard, which made the court the gap left
+between the wings rather than the room the house is arranged around.
+
+Where the walk down a range's flank faces a yard, its outer side is now an **arcade**: piers at four blocks
+with the wall taken out between them, so the walk and the court are one space at ground level and you cross a
+courtyard house under cover without ever going through a door. The wall above the piers stays, because what
+makes a loggia a loggia is that it is roofed — the storey over it, or the rafters of a single-storey range.
+Nothing is cut into the arcade wall: the arcade is the opening, so the lights the facade pass would have put
+there are removed.
+
+Seventy covered walks across a 108-plan slice, in 49 of the plans; the courtyard castle has the most of them,
+which is what a quadrangle is for. §10.1 asks for the loggia's condition to be kept explicit alongside the
+court's and the hall's, and it is: `open` is `covered`, not `interior` or `exterior`.
 
 ## The courtyard castle
 

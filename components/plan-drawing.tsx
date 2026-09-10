@@ -126,7 +126,21 @@ function Diagnostics({plan,floor,mode}:{plan:Plan;floor:Floor;mode:Diagnostic}){
  * corbels, so a projecting room is never a room floating in mid-air; a niche is the shallow inward case.
  */
 function Articulation({plan,y,colors}:{plan:Plan;y:number;colors:boolean}){
-  return <g>{plan.articulation.map(a=>{
+  return <g>
+    {/* A loggia's outer side is an arcade, so the drawing shows piers standing in an open wall rather than a
+        wall with doors punched through it: the walk and the yard it serves are one space at this floor. */}
+    {plan.reservations.filter(v=>v.kind==='loggia'&&v.fromY===y&&v.side).map(v=>{
+      const b=v.bounds,across=v.side==='n'||v.side==='s';
+      const edge=v.side==='n'?b.z:v.side==='s'?b.z+b.d:v.side==='w'?b.x:b.x+b.w;
+      const from=across?b.x:b.z,run=across?b.w:b.d;
+      const fill=colors?ROOM_COLORS.circulation:'#eee4cd';
+      return <g key={v.id}>
+        {Array.from({length:Math.max(0,run-1)},(_,k)=>k+1).filter(i=>i%4!==0).map(i=>
+          <rect key={i} x={across?from+i:edge} y={across?edge:from+i} width="1" height="1" fill={fill}/>)}
+        {Array.from({length:Math.floor(run/4)+1},(_,k)=>k*4).filter(i=>i<=run).map(i=>
+          <rect key={`p${i}`} x={across?from+i:edge} y={across?edge:from+i} width="1" height="1" fill="#707566" stroke="#4a4f43" strokeWidth=".14"/>)}
+      </g>;})}
+    {plan.articulation.map(a=>{
     if(a.role==='chimney')return null;
     const room=plan.rooms.find(r=>a.roomIds.includes(r.id));
     const fill=colors&&room?ROOM_COLORS[room.kind]:'#eee4cd';

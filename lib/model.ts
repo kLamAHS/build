@@ -15,13 +15,15 @@ export type Stair={id:string;componentId:string;roomIds:string[];bounds:Rect;fro
 export type Void={id:string;name:string;bounds:Rect;polygon:Point[];holes:Rect[];floorY:number;ceilingY:number;kind:ReservationKind};
 /**
  * A volume the storeys owe each other, settled before any floor is divided so that an upper plan inherits
- * it rather than discovering it. The three conditions are kept apart because they are not the same thing:
+ * it rather than discovering it. The four conditions are kept apart because they are not the same thing:
  * a court is open exterior for its whole height, a hall is interior volume with no floor carried across it,
- * and a stair well is the hole one storey leaves in the next. Nothing may be built in a reservation except
- * what it names as its own exception — a gallery may overlook a hall; a chamber may not be dropped into it.
+ * a stair well is the hole one storey leaves in the next, and a loggia is covered overhead but open to the
+ * weather down one side. Nothing may be built in a reservation except what it names as its own exception —
+ * a gallery may overlook a hall, and a covered walk is what a loggia is for; a chamber may not be dropped
+ * into either.
  */
-export type ReservationKind='hall'|'stair'|'court';
-export type Reservation={id:string;kind:ReservationKind;name:string;componentId:string;bounds:Rect;polygon:Point[];fromY:number;toY:number;open:'interior'|'exterior';reason:string};
+export type ReservationKind='hall'|'stair'|'court'|'loggia';
+export type Reservation={id:string;kind:ReservationKind;name:string;componentId:string;bounds:Rect;polygon:Point[];fromY:number;toY:number;open:'interior'|'exterior'|'covered';side?:'n'|'s'|'e'|'w';reason:string};
 export type Floor={index:number;name:string;elevation:number;rooms:Room[];voids:Void[];roofComponents:string[]};
 export type BlockKind='wall'|'floor'|'roof'|'stair'|'support'|'furniture'|'ground'|'glass'|'chimney'|'air';
 export type BlockBox={x:number;y:number;z:number;w:number;h:number;d:number;material:number;kind:BlockKind;componentId:string;ownerFloor?:number};

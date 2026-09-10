@@ -341,8 +341,8 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   // are not the same thing: a court is open exterior for its whole height; a hall is interior volume with no
   // floor carried across it; a stair well is the hole one storey leaves in the next. Nothing is built in a
   // reservation except what it names as its own exception.
-  const reserve=(kind:Reservation['kind'],name:string,c:BuildingComponent,bounds:Rect,polygon:Point[],fromY:number,toY:number,open:Reservation['open'],reason:string)=>{
-    if(toY>fromY)p.reservations.push({id:`v${p.reservations.length}`,kind,name,componentId:c.id,bounds,polygon,fromY,toY,open,reason});
+  const reserve=(kind:Reservation['kind'],name:string,c:BuildingComponent,bounds:Rect,polygon:Point[],fromY:number,toY:number,open:Reservation['open'],reason:string,side?:'n'|'s'|'e'|'w')=>{
+    if(toY>fromY)p.reservations.push({id:`v${p.reservations.length}`,kind,name,componentId:c.id,bounds,polygon,fromY,toY,open,side,reason});
   };
   for(const c of components){
     if(c.kind==='court'){
@@ -835,8 +835,15 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
         // would carry the rank away from the stair shaft, and the upper floors would lose their stair.
         const walkX=Math.max(rb.x,Math.min(grain!.walk,rb.x+rb.w-BAND));
         const onCourt=alongFlank!=='mid'&&js.some(j=>j.side===alongFlank&&j.other.kind==='court');
-        room(c,f<0?'Cellar passage':onCourt?'Court gallery':c.kind==='service'?'Service passage':f===0?'Gallery':'Gallery landing',
+        const walk=room(c,f<0?'Cellar passage':onCourt?'Court gallery':c.kind==='service'?'Service passage':f===0?'Gallery':'Gallery landing',
           'circulation',{x:walkX,z:rb.z,w:BAND,d:rb.d},y);
+        // A covered edge open to the yard is the fourth of the conditions §10 asks to be kept apart: roofed
+        // by the storey over it, but with an arcade down one side instead of a wall. It is the walk a
+        // household actually uses to cross a courtyard house, and building it as a wall with doors in it
+        // makes the yard something you pass rather than something the house is arranged around.
+        if(f===0&&onCourt&&(alongFlank==='e'?walkX+BAND===rb.x+rb.w:walkX===rb.x))
+          reserve('loggia',`${walk.name} arcade`,c,walk.bounds,rectPolygon(walk.bounds),y,y+6,'covered',
+            `A covered walk open to the yard down its ${alongFlank==='e'?'east':'west'} side`,alongFlank);
         const ranks=([
           {rect:{x:walkX+BAND,z:rb.z,w:rb.x+rb.w-walkX-BAND,d:rb.d},outer:'e' as const},
           {rect:{x:rb.x,z:rb.z,w:walkX-rb.x,d:rb.d},outer:'w' as const},
@@ -1318,7 +1325,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   for(const y of [...new Set(p.rooms.map(r=>r.floorY))].sort((a,b)=>a-b)){
     // A floor's voids are not worked out again here: they are the reservations that reach this level, so a
     // hole in the boards is always the volume something else was given rather than an unexplained gap.
-    const voids=p.reservations.filter(v=>v.kind!=='court'&&y>=v.fromY&&y<v.toY).map(v=>({
+    const voids=p.reservations.filter(v=>(v.kind==='hall'||v.kind==='stair')&&y>=v.fromY&&y<v.toY).map(v=>({
       id:`${v.id}-${y}`,name:v.name,kind:v.kind,bounds:v.bounds,polygon:v.polygon,floorY:y,ceilingY:v.toY,
       holes:v.kind==='hall'?p.rooms.filter(r=>r.componentId===v.componentId&&r.floorY===y).map(r=>r.bounds):[],
     }));
@@ -1798,6 +1805,26 @@ function buildGeometry(p:Plan){
         bounds,side,baseY:y+2,topY:y+5,reason:`A recess in the thickness of the ${room.name.toLowerCase()} wall`});
       cut++;
     }
+  }
+  // ---- Arcades. A covered walk down a courtyard range is not a corridor with doors onto the yard: its
+  // outer side is an arcade, so the walk is open to the court it serves along its whole length and the yard
+  // reads as the room the house is arranged around rather than the gap left between its wings. The piers
+  // stand at four blocks; the wall above them stays, because what makes a loggia a loggia is that it is
+  // roofed.
+  for(const v of p.reservations.filter(v=>v.kind==='loggia')){
+    const c=p.components.find(o=>o.id===v.componentId);
+    if(!c||!v.side)continue;
+    const fo=componentFootprint(c,v.fromY,p.family),across=v.side==='n'||v.side==='s';
+    const edge=v.side==='n'?fo.z:v.side==='s'?fo.z+fo.d:v.side==='w'?fo.x:fo.x+fo.w;
+    const from=across?v.bounds.x:v.bounds.z,run=across?v.bounds.w:v.bounds.d,arcade=new Set<string>();
+    for(let i=1;i<run;i++){
+      const x=across?from+i:edge,z=across?edge:from+i;
+      arcade.add(`${x},${z}`);
+      if(i%4===0)continue;
+      box({x,z,w:1,d:1},v.fromY+1,4,0,'air',c.id);
+    }
+    // A slit cut in the pier of an arcade is a window into thin air; the arcade is the opening.
+    p.openings=p.openings.filter(o=>o.type!=='window'||!Array.from({length:o.width},(_,w)=>`${o.x+(o.axis==='z'?w:0)},${o.z+(o.axis==='x'?w:0)}`).some(k=>arcade.has(k)));
   }
   // An opening is cut through the whole thickness of its wall: a door becomes a passage and a window a
   // reveal, rather than a hole in the inner face with masonry still standing behind it.

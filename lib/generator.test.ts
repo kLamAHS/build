@@ -649,7 +649,7 @@ void test('the storeys inherit their volumes instead of discovering them',()=>{
     for(const v of p.reservations){
       assert.ok(v.toY>v.fromY,`${tag}: ${v.name} reserves no height`);
       assert.ok(v.reason.length>10,`${tag}: ${v.name} carries no reason`);
-      assert.equal(v.open,v.kind==='court'?'exterior':'interior',`${tag}: ${v.kind} is ${v.open}`);
+      assert.equal(v.open,v.kind==='court'?'exterior':v.kind==='loggia'?'covered':'interior',`${tag}: ${v.kind} is ${v.open}`);
       assert.ok(p.components.some(c=>c.id===v.componentId),`${tag}: ${v.name} belongs to no range`);
       if(v.kind==='hall'){halls++;assert.equal(v.componentId,hall.id);assert.equal(v.fromY,6);assert.equal(v.toY,hall.topY);}
       if(v.kind==='stair')wells++;
@@ -804,4 +804,51 @@ void test('the fixed-seed batch reports accepted-plan validity and search succes
   assert.deepEqual(out.invalid.map(b=>`${b.settings} ${b.issues[0]}`),[],'the batch returned plans it calls valid that are not');
   assert.ok(out.found>=out.settings*.95,`search found a plan for only ${out.found} of ${out.settings}: ${out.failures.slice(0,3).map(f=>f.reason).join('; ')}`);
   assert.ok(out.meanNavigation>70&&out.meanComposition>70,`mean navigability ${out.meanNavigation}, mean composition ${out.meanComposition}`);
+});
+
+void test('a covered walk is open to the yard it serves',()=>{
+  // The defect this answers: a courtyard range whose walk was a corridor with doors onto the yard, so the
+  // court was the gap between the wings rather than the room the house was arranged around.
+  let loggias=0,plans=0,withOne=0;
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind])for(const seed of ['ARCADE-0','ARCADE-1']){
+    const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size:320,floors:3,seed});
+    const tag=`${family.id}/${seed}`;
+    plans++;
+    const grid=voxelize(p);
+    const here=p.reservations.filter(v=>v.kind==='loggia');
+    if(here.length)withOne++;
+    for(const v of here){
+      loggias++;
+      assert.equal(v.open,'covered',`${tag}: a loggia recorded as ${v.open}`);
+      assert.ok(v.side,`${tag}: ${v.name} is open on no particular side`);
+      // It is covered: something stands over it somewhere in the roof above.
+      const mid={x:v.bounds.x+Math.floor(v.bounds.w/2),z:v.bounds.z+Math.floor(v.bounds.d/2)};
+      let covered=false;
+      for(let y=v.toY;y<=v.toY+14&&!covered;y++)if(grid.material(mid.x,y,mid.z))covered=true;
+      assert.ok(covered,`${tag}: ${v.name} has nothing over it`);
+      // It is open: most of its outer side is arcade rather than wall, and it faces a yard.
+      const across=v.side==='n'||v.side==='s';
+      const b=v.bounds,edge=v.side==='n'?b.z:v.side==='s'?b.z+b.d:v.side==='w'?b.x:b.x+b.w;
+      const from=across?b.x:b.z,run=across?b.w:b.d;
+      let open=0;
+      for(let i=1;i<run;i++)if(!grid.material(across?from+i:edge,v.fromY+2,across?edge:from+i))open++;
+      assert.ok(open*2>=run,`${tag}: ${v.name} is open along ${open} of ${run} blocks`);
+      // Piers still stand between the bays: an arcade is not an absent wall.
+      let piers=0;
+      for(let i=0;i<=run;i+=4)if(grid.material(across?from+i:edge,v.fromY+2,across?edge:from+i))piers++;
+      assert.ok(piers>=2,`${tag}: ${v.name} has ${piers} piers, so its wall is simply missing`);
+      // Nothing is cut into the arcade: the arcade is the opening.
+      for(const o of p.openings.filter(o=>o.type==='window')){
+        const cells=Array.from({length:o.width},(_,w)=>({x:o.x+(o.axis==='z'?w:0),z:o.z+(o.axis==='x'?w:0)}));
+        const inWall=cells.some(c=>(across?c.z===edge&&c.x>from&&c.x<from+run:c.x===edge&&c.z>from&&c.z<from+run));
+        assert.ok(!inWall,`${tag}: a light is cut into the arcade of ${v.name}`);
+      }
+      // Only the walk itself stands in it.
+      for(const r of p.rooms.filter(r=>r.floorY>=v.fromY&&r.floorY<v.toY&&intersects(v.bounds,r.bounds)))
+        assert.equal(r.kind,'circulation',`${tag}: ${r.name} stands in ${v.name}`);
+    }
+    assert.deepEqual(auditArchitecture(p,grid),[],`${tag}: the plan does not pass its own audit`);
+  }
+  assert.ok(loggias>=plans*.4,`only ${loggias} covered walks across ${plans} estates`);
+  assert.ok(withOne>=plans*.3,`only ${withOne} of ${plans} estates have one at all`);
 });
