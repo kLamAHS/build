@@ -1,6 +1,6 @@
 # Keepwright
 
-A medieval build-planning application with deterministic castle, manor, and house generation; furnished room plans; planned household circulation; drawing layers; and PNG, SVG, and JSON exports.
+A medieval build-planning application with deterministic castle, manor, and house generation; furnished room plans; planned household circulation; drawing layers; and PNG, SVG, JSON and Litematica exports.
 
 ## Development
 
@@ -8,7 +8,7 @@ Use Node 22.13 or later, `npm install`, and `npm run dev`. Run `npm run build` t
 
 ## Checks
 
-`npm test` checks deterministic generation, 3,150 combinations of footprints and room geometry, aligned floors, size-dependent room counts, feature options, agent-tool input contracts, that every diagnostic overlay draws, and the circulation, composition, proportion and facade rules below. `npx tsc --noEmit` checks types.
+`npm test` checks deterministic generation, 3,150 combinations of footprints and room geometry, aligned floors, size-dependent room counts, feature options, agent-tool input contracts, that every diagnostic overlay draws, that a Litematica export reads back as the blocks it was given, and the circulation, composition, proportion and facade rules below. `npx tsc --noEmit` checks types.
 
 `npm run batch` runs the fixed-seed regression suite — 1,000 estates by default, `npm run batch 200` for a
 shorter run. It reports the two outcomes separately, and never adds them together:
@@ -183,6 +183,44 @@ The hole a stair comes up through is a void, and is drawn as one: its own perime
 annotation, rather than an unexplained grey gap in the boards. The audit rejects a plan where a door opens
 onto one — the route test would have caught it as a missing floor, but a household walking off a landing into
 the stair well deserves to be told what it is.
+
+## Building it in the world
+
+Two of the export options write `.litematic` files, which Litematica reads straight off disk: put them in
+`.minecraft/schematics`, or your instance's own schematics folder, and load one from Litematica's menu.
+
+**Floor outline** is the one to build from. It is a single course, one block high, read at head height rather
+than at the floor — because that is the course a doorway is a gap in and a window is glass in, where an
+outline taken at floor level would be a continuous ring telling you nothing about the way in. Three blocks,
+so it reads without a legend:
+
+| Block | What it is |
+|---|---|
+| Stone brick | Wall |
+| Glass | A window |
+| Oak planks | A doorway — walk over it, and you can still see the line |
+
+Lay it out, and build up from it. A 512-block estate's outline is about 3 kB.
+
+**Complete building** is every block of every floor, mapped from the plan's own materials — masonry to stone
+brick, timber to oak planks, plaster to white terracotta, roofing to grey terracotta, glass to glass, paving
+to cobblestone, garden to grass, hearths to brick and furnishings to oak log. About 90 kB for the largest
+estate the generator makes.
+
+Both are gzipped NBT written by `lib/litematica.ts`, which writes the tags this one format needs and no
+others. Two deliberate choices are in there:
+
+- **Schematic version 5, not the current 6.** They differ only in how entities and tile entities carry their
+  positions; this writer has neither, and every Litematica since Minecraft 1.13 reads 5 where the older ones
+  refuse 6.
+- **A data version behind the client.** Minecraft upgrades a schematic older than the client and refuses one
+  that is newer, so being behind is the safe direction to be wrong in, and every block in the palette has
+  existed since 1.13.
+
+The block states are packed the way Litematica packs them — entries of *n* bits end to end, straddling the
+boundary between one long and the next, which is not the padded packing modern Minecraft chunks use. The
+tests read the file back with an NBT reader written from the format rather than from the writer, and unpack
+every cell of an outline with Litematica's own read, so the two have to agree.
 
 ## What every stage is held to
 
