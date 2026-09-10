@@ -1,6 +1,7 @@
 import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Suite, type Court, type GenerationResult, type BlockBox } from './model.ts';
-import { isCirculation, navigationReport, articulationPoints, ROOM_PRIVACY } from './navigation.ts';
+import { isCirculation, navigationReport, articulationPoints, HALL_END, IMPROPER_DOORS, ROOM_PRIVACY } from './navigation.ts';
 import { auditArchitecture } from './architectural-audit.ts';
+import { compositionReport } from './composition.ts';
 
 export { DEFAULT_SETTINGS, FAMILIES } from './model.ts';
 export function hash(text:string) { let h=2166136261; for(const c of text) h=Math.imul(h^c.charCodeAt(0),16777619); return h>>>0; }
@@ -282,7 +283,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   if(family==='keep-bailey'&&!small&&domestic)attach(domestic,'workshop','Garrison range','n',26,34,Math.min(2,s.floors),0);
   if(family==='double-ward'&&!small){const end=[...components].sort((a,b)=>b.bounds.x+b.bounds.w-a.bounds.x-a.bounds.w)[0];attach(end,'gatehouse','Outer ward gate','e',16,14,1,0);}
   // Compact budgets keep the same minimum stair and room sizes; optional ranges are omitted.
-  const p:Plan={schemaVersion:2,generatorVersion:'2.0',name:reference?'Alderhall Manor':`${pick(names)}${pick(['wick','mere','ford','haven'])} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,family,components,rooms:[],floors:[],openings:[],stairs:[],chimneys:[],courts:[],routes:[],blocks:[],walls:[],slabs:[],roofs:[],supports:[],bounds:{x:0,z:0,w:0,d:0},minY:s.cellar?-6:0,maxY:0,width:0,depth:0,totalArea:0,entry:{x:0,z:0},connections:[],suites:[],validation:{valid:true,issues:[]},navigation:{maxDepth:0,meanDepth:0,loops:0,unreachable:[],transits:[],strandedRooms:0,score:0},signature:''};
+  const p:Plan={schemaVersion:2,generatorVersion:'2.0',name:reference?'Alderhall Manor':`${pick(names)}${pick(['wick','mere','ford','haven'])} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,family,components,rooms:[],floors:[],openings:[],stairs:[],chimneys:[],courts:[],routes:[],blocks:[],walls:[],slabs:[],roofs:[],supports:[],bounds:{x:0,z:0,w:0,d:0},minY:s.cellar?-6:0,maxY:0,width:0,depth:0,totalArea:0,entry:{x:0,z:0},connections:[],suites:[],validation:{valid:true,issues:[]},navigation:{maxDepth:0,meanDepth:0,loops:0,unreachable:[],transits:[],strandedRooms:0,compromises:0,score:0},composition:{volumes:0,reach:0,spread:0,yards:0,hierarchy:0,frontage:0,score:0},signature:''};
   function room(c:BuildingComponent,name:string,kind:RoomKind,bounds:Rect,y:number,ceiling=y+6,shape:RoomShape='rect',shapeSide:'n'|'s'|'e'|'w'='e',notch?:Rect,corners?:DaisCorners){
     const envelope=c.kind==='tower'?c.polygon:rectPolygon(componentFootprint(c,y,family));
     const polygon=shape==='rect'?clipPolygon(envelope,bounds):clipPolygon(shapePolygon(bounds,shape,shapeSide,notch,corners),componentFootprint(c,y,family));
@@ -380,7 +381,12 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     // What is left either side has to be able to hold a room of the strip's own depth, not merely five
     // blocks of it: a slot narrower than that is the strip stood on its side, which is not a room at all.
     const cross=(axis==='x'?strip.d:strip.w)-1;
-    const least=Math.max(MIN_ROOM,Math.min(MIN_ROOM*2,Math.round(cross/2.2)+1));
+    const roomy=Math.max(MIN_ROOM,Math.min(MIN_ROOM*2,Math.round(cross/2.2)+1));
+    // Proportion first, and where the strip cannot hold both a passage and a room in proportion, the passage
+    // wins: a room a little out of square costs less than a neighbour reached through a chamber. Only a
+    // little, though — past the audit's own limit the room stops being a room and the candidate is refused.
+    const spare=Math.max(MIN_ROOM,Math.ceil(cross/3)+1);
+    for(const least of roomy>spare?[roomy,spare]:[roomy]){
     if(run>=least+SPUR)for(const span of spans){
       const ideal=spanCentre(span.lo,span.hi,SPUR);
       // As near the middle of the shared wall as leaves a room either side; failing that, hard against one
@@ -396,6 +402,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
         if(after>0)slots.push(part(at+SPUR,after));
         return {slots,spur:part(at,SPUR)};
       }
+    }
     }
     return {slots:[strip]};
   }
@@ -980,14 +987,10 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   const strayFromSuite=(e:typeof candidates[number])=>(suiteMember.has(e.a.id)&&isCirculation(e.b))||(suiteMember.has(e.b.id)&&isCirculation(e.a));
   const wide=(m:typeof candidates[number],n:typeof candidates[number])=>n.span-m.span||m.a.id.localeCompare(n.a.id)||m.b.id.localeCompare(n.b.id);
   const open=(e:typeof candidates[number])=>e.priority>=0&&!strayFromSuite(e);
-  // Doors a household would never have cut. Service reaches the hall through the screens passage, not
-  // through the hall body; nothing opens off the chapel but its antechapel; a bedchamber is not a back door.
-  const IMPROPER:Partial<Record<RoomKind,RoomKind[]>>={hall:['service','storage','bedroom'],sacred:['service','storage','bedroom','study'],bedroom:['service','bedroom','sacred','hall'],service:['hall','sacred','bedroom'],storage:['hall','sacred'],study:['sacred']};
   const chapelRooms=new Set(p.rooms.filter(r=>components.find(c=>c.id===r.componentId)?.kind==='chapel').map(r=>r.id));
   // The hall has two doors and they are at its ends: the screens at the service end, and the door to the
   // private side at the dais. A door cut into the middle of its flank is a shortcut through the room the
   // whole house is built round, and it is what turns a great hall into a wide corridor.
-  const HALL_END=7;
   const throughHall=(e:typeof candidates[number])=>{
     const hall=e.a.kind==='hall'?e.a:e.b.kind==='hall'?e.b:undefined;
     if(!hall||(hall===e.a?e.b:e.a).componentId===hall.componentId)return false;
@@ -997,7 +1000,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     const lo=along==='z'?b.z:b.x,len=along==='z'?b.d:b.w;
     return e.pos>lo+HALL_END&&e.pos<lo+len-HALL_END-1;
   };
-  const improper=(e:typeof candidates[number])=>(IMPROPER[e.a.kind]??[]).includes(e.b.kind)||(IMPROPER[e.b.kind]??[]).includes(e.a.kind)
+  const improper=(e:typeof candidates[number])=>(IMPROPER_DOORS[e.a.kind]??[]).includes(e.b.kind)||(IMPROPER_DOORS[e.b.kind]??[]).includes(e.a.kind)
     ||throughHall(e)
     ||(chapelRooms.has(e.a.id)&&!chapelRooms.has(e.b.id)&&!isCirculation(e.b))
     ||(chapelRooms.has(e.b.id)&&!chapelRooms.has(e.a.id)&&!isCirculation(e.a));
@@ -1241,6 +1244,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   p.bounds={x:minX-8,z:minZ-8,w:maxX-minX+16,d:maxZ-minZ+16};p.width=maxX-minX;p.depth=maxZ-minZ;p.maxY=highY-1;p.minY=lowY;p.totalArea=p.rooms.reduce((a,r)=>a+r.area,0);
   p.signature=hash(JSON.stringify(components.map(c=>[c.kind,c.bounds.w,c.bounds.d,c.parentId,c.storeys,c.bounds.x,c.bounds.z]))).toString(16);
   p.navigation=navigationReport(p);
+  p.composition=compositionReport(p);
   p.validation=validatePlan(p);
   return p;
 }
@@ -1435,24 +1439,41 @@ export function validatePlan(p:Plan):Plan['validation']{
   return {valid:issues.length===0,issues:[...new Set(issues)]};
 }
 /**
- * Compose several candidates and keep the one that walks best, rather than the first that merely stands up.
- * A plan with no forced crossings is accepted immediately, so the common case still costs one composition.
- * The attempt count is fixed per size so the result stays a pure function of the settings.
+ * Validity first, then how the thing walks, then how it stands. A forced crossing is the defect this
+ * generator exists to avoid, so navigation carries twice the weight of composition; but between two plans
+ * that both walk, the one that is a building rather than a chain of sheds wins.
+ */
+export const rank=(p:Plan)=>p.navigation.score*2+p.composition.score;
+/**
+ * How many compositions a seed is worth trying. Each further candidate buys less than the one before it:
+ * across a 144-setting survey the fifth is worth a point of rank and the eighth barely half of one, against
+ * a full composition apiece — and a large site costs more per candidate, so it is allowed fewer.
+ */
+export const candidateCount=(settings:Settings)=>settings.size>320?3:5;
+/**
+ * Compose every candidate the seed is worth and keep the best of them, rather than the first that merely
+ * stands up. The attempt count is fixed per size so the result stays a pure function of the settings.
  */
 export function tryGenerate(settings:Settings):GenerationResult {
   let reason='The composition could not be connected.';
-  let best:Plan|undefined;
-  const attempts=settings.size>320?4:8;
-  for(let attempt=0;attempt<attempts;attempt++){
+  const budget=candidateCount(settings),cap=8,candidates:Plan[]=[];
+  for(let attempt=0;attempt<cap;attempt++){
     let plan:Plan;
     try{plan=generateCandidate(settings,attempt);}catch(error){return {ok:false,error:error instanceof Error?error.message:'Invalid settings.'};}
     if(!plan.validation.valid){reason=plan.validation.issues.join(' ');continue;}
-    const issues=auditArchitecture(plan);
-    if(issues.length){reason=issues.join(' ');continue;}
-    if(!plan.navigation.transits.length)return {ok:true,plan};
-    if(!best||plan.navigation.score>best.navigation.score)best=plan;
+    candidates.push(plan);
+    // The ordinary budget is enough once something walks without a forced crossing. A seed that has not
+    // produced one yet is worth more compositions than a seed that has; that is where the effort belongs.
+    if(attempt+1>=budget&&candidates.some(p=>!p.navigation.transits.length))break;
   }
-  if(best)return {ok:true,plan:best};
+  // Rank on what is cheap to know, and pay for the built check on the best of them in turn. Voxelising
+  // every candidate to audit it costs more than composing them all, and tells us nothing about the losers.
+  candidates.sort((a,b)=>rank(b)-rank(a));
+  for(const plan of candidates){
+    const issues=auditArchitecture(plan);
+    if(!issues.length)return {ok:true,plan};
+    reason=issues.join(' ');
+  }
   return {ok:false,error:`Could not make a buildable composition: ${reason} Try a different seed or a larger footprint. Your previous build is retained.`};
 }
 export function generatePlan(settings:Settings):Plan {const result=tryGenerate(settings);if(!result.ok)throw new Error(result.error);return result.plan;}

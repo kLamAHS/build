@@ -1,10 +1,52 @@
-import { type Navigation, type Plan, type Room, type RoomKind, type Transit } from './model.ts';
+import { type Navigation, type Opening, type Plan, type Room, type RoomKind, type Transit } from './model.ts';
 
 /** Rooms a household may cross to reach somewhere else. Everything else is a destination, not a route. */
 export const CIRCULATION_KINDS:readonly RoomKind[]=['circulation','stairs','gallery','hall','court'];
 export const isCirculation=(r:Room)=>CIRCULATION_KINDS.includes(r.kind);
 /** How private a room is. A route forced through a steward's office is a compromise; a bedchamber is not. */
 export const ROOM_PRIVACY:Record<RoomKind,number>={court:0,circulation:0,stairs:0,hall:1,gallery:1,sacred:2,study:3,service:3,storage:4,bedroom:5};
+
+/**
+ * Doors a household would not have cut. Service reaches the hall through the screens passage rather than
+ * through the hall body; nothing opens off a chapel but its antechapel; a bedchamber is not a back door.
+ * The generator uses this to decide which doors to cut; the report uses it to count the ones it had to.
+ */
+export const IMPROPER_DOORS:Partial<Record<RoomKind,RoomKind[]>>={
+  hall:['service','storage','bedroom'],sacred:['service','storage','bedroom','study'],
+  bedroom:['service','bedroom','sacred','hall'],service:['hall','sacred','bedroom'],
+  storage:['hall','sacred'],study:['sacred'],
+};
+/** How far along a hall's own axis a door may sit before it is a shortcut through the room, not a threshold. */
+export const HALL_END=7;
+
+/**
+ * The doors in a finished plan that the access grammar would not have chosen — cut only because nothing
+ * else reached. A plan needing several of them is connected but compromised, and the ranker should say so.
+ */
+export function improperDoors(plan:Plan):Opening[] {
+  const byId=new Map(plan.rooms.map(r=>[r.id,r]));
+  const kindOf=new Map(plan.components.map(c=>[c.id,c.kind]));
+  const sacred=new Set(plan.rooms.filter(r=>kindOf.get(r.componentId)==='chapel').map(r=>r.id));
+  const out:Opening[]=[];
+  for(const o of plan.openings){
+    if(o.type==='window'||o.roomIds.length<2)continue;
+    const a=byId.get(o.roomIds[0]),b=byId.get(o.roomIds[1]);
+    if(!a||!b)continue;
+    const bad=(IMPROPER_DOORS[a.kind]??[]).includes(b.kind)||(IMPROPER_DOORS[b.kind]??[]).includes(a.kind)
+      ||(sacred.has(a.id)!==sacred.has(b.id)&&!isCirculation(sacred.has(a.id)?b:a));
+    if(bad){out.push(o);continue;}
+    // A door into the middle of the hall's flank is a second route through the room the house is built round.
+    const hall=a.kind==='hall'?a:b.kind==='hall'?b:undefined;
+    if(!hall)continue;
+    const other=hall===a?b:a;
+    if(other.componentId===hall.componentId)continue;
+    const r=hall.bounds,along:'x'|'z'=r.d>=r.w?'z':'x';
+    if((along==='z')===(o.axis==='z'))continue;
+    const lo=along==='z'?r.z:r.x,len=along==='z'?r.d:r.w,at=along==='z'?o.z:o.x;
+    if(at>lo+HALL_END&&at<lo+len-HALL_END-1)out.push(o);
+  }
+  return out;
+}
 
 export type AccessGraph={adjacency:Map<string,string[]>;depth:Map<string,number>;entry:string|undefined;unreachable:string[]};
 
@@ -77,6 +119,7 @@ export function transitViolations(plan:Plan,graph=accessGraph(plan)):Transit[] {
 /** How the finished plan actually walks. 100 is no forced crossings, shallow routes and a way back round. */
 export function navigationReport(plan:Plan):Navigation {
   const graph=accessGraph(plan),transits=transitViolations(plan,graph),depths=[...graph.depth.values()];
+  const compromises=improperDoors(plan).length;
   const maxDepth=depths.length?Math.max(...depths):0;
   const meanDepth=depths.length?depths.reduce((a,b)=>a+b,0)/depths.length:0;
   const doorways=new Set(plan.connections.map(([a,b])=>a<b?`${a}|${b}`:`${b}|${a}`)).size;
@@ -86,8 +129,11 @@ export function navigationReport(plan:Plan):Navigation {
   const crossings=Math.min(60,transits.length*12+stranded.size*2);
   const reach=Math.min(25,Math.max(0,maxDepth-6)*2.5);
   const alternatives=Math.min(15,Math.max(0,loops)*3);
-  const score=Math.max(0,Math.round(85-crossings-reach-graph.unreachable.length*10+alternatives));
-  return {maxDepth,meanDepth:Number(meanDepth.toFixed(2)),loops,unreachable:graph.unreachable,transits,strandedRooms:stranded.size,score};
+  // A door the grammar would not have cut is a compromise, not a defect: the plan works, but a household
+  // is walking through somewhere it would not have opened.
+  const grudging=Math.min(12,compromises*4);
+  const score=Math.max(0,Math.round(85-crossings-reach-grudging-graph.unreachable.length*10+alternatives));
+  return {maxDepth,meanDepth:Number(meanDepth.toFixed(2)),loops,unreachable:graph.unreachable,transits,strandedRooms:stranded.size,compromises,score};
 }
 
 /** The door-by-door walk from the entrance to one room, for the plan's room inspector. */

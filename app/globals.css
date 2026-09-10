@@ -29,6 +29,10 @@ select{font:inherit;background:#fcfcf7;border:1px solid #d6ddcd;border-radius:5p
 .navigability strong{font-family:Georgia,serif;font-size:17px;font-weight:400;color:#3f654b;line-height:1}
 .navigability>span{letter-spacing:1.2px;font-size:10px;text-transform:uppercase}
 .navigability em{font-style:normal;color:#8a9a7d;padding-left:9px;border-left:1px solid #dde4d5}
+.navigability.composition{border-color:#d8dee6;background:#f0f3f7;color:#6f7d91}
+.navigability.composition svg{color:#8493a8}
+.navigability.composition strong{color:#3f5165}
+.navigability.composition em{border-left-color:#d8dee6;color:#8593a6}
 .navigability.compromised{border-color:#e2d0bb;background:#f7efe4;color:#8b6f4f}
 .navigability.compromised strong{color:#8b5635}
 .navigability.compromised svg{color:#b08a5e}

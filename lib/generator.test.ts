@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { generatePlan, tryGenerate } from './architecture.ts';
+import { candidateCount, generateCandidate, generatePlan, rank, tryGenerate } from './architecture.ts';
+import { compositionReport } from './composition.ts';
 import { DEFAULT_SETTINGS, FAMILIES, insidePolygon, type Settings, type Plan, type Rect } from './model.ts';
 import { voxelize, prepareMeshes, SparseBlocks } from './voxels.ts';
+import { auditArchitecture } from './architectural-audit.ts';
 import { accessGraph, transitViolations, isCirculation, routeToRoom, navigationReport, articulationPoints } from './navigation.ts';
 
 export const representatives:Settings[]=(['house','manor','castle'] as const).flatMap(kind=>[128,256].flatMap(size=>[0,1,2].map(i=>({...DEFAULT_SETTINGS,kind,size,seed:`REVIEW-${kind}-${size}-${i}`,family:FAMILIES[kind][i].id}))));
@@ -253,6 +255,31 @@ void test('ordinary rooms keep their proportions: no strip a wing long, nothing 
   assert.ok(counted>500,`only ${counted} ordinary rooms surveyed`);
   assert.ok(worstShape<=3.2,`the longest ordinary room is ${worstShape.toFixed(1)} times its width: ${shape}`);
   assert.ok(worstSize<=760,`the largest ordinary room has taken ${worstSize} blocks: ${size}`);
+});
+void test('candidates are ranked on how they stand as well as on how they walk',()=>{
+  // The ranker used to return the first candidate with no forced crossing, whatever it looked like, so a
+  // composition strung out in a chain of sheds was accepted as readily as a building.
+  const seeds=[0,1,2,3].flatMap(i=>(['manor','castle'] as const).map(kind=>({...DEFAULT_SETTINGS,kind,family:'auto' as const,size:288,floors:3,seed:`RANK-${i}`})));
+  for(const settings of seeds){
+    const chosen=generatePlan(settings);
+    assert.deepEqual(chosen.composition,compositionReport(chosen),'the plan carries the report the module computes');
+    // Whatever the seed allows, the plan returned is the best of them by the generator's own ranking.
+    const others=Array.from({length:candidateCount(settings)},(_,a)=>{try{return generateCandidate(settings,a);}catch{return undefined;}})
+      .filter((p):p is Plan=>!!p&&p.validation.valid&&!auditArchitecture(p).length);
+    const better=others.filter(p=>rank(p)>rank(chosen));
+    assert.deepEqual(better.map(p=>`${p.navigation.score}/${p.composition.score}`),[],
+      `${settings.seed}: a better candidate than ${chosen.navigation.score}/${chosen.composition.score} was passed over`);
+  }
+  // A composition is a building rather than a chain: nothing is many volumes deep from the hall.
+  let deep=0,plans=0;
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind])for(const size of [160,288]){
+    const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size,floors:3,seed:'STAND'});
+    plans++;
+    assert.ok(p.composition.volumes>=2,`${family.id}/${size}: ${p.composition.volumes} volumes`);
+    assert.ok(p.composition.frontage>=0.75,`${family.id}/${size}: only ${(p.composition.frontage*100).toFixed(0)}% of rooms have an outside wall`);
+    if(p.composition.reach>5)deep++;
+  }
+  assert.ok(deep/plans<=0.15,`${deep} of ${plans} compositions straggle more than five volumes from the hall`);
 });
 void test('the estate composes its open space, and each volume takes its shape from what it houses',()=>{
   // The defect this answers: every addition drawn as a rectangle of much the same proportions, attached to

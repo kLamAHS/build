@@ -30,6 +30,32 @@ number of independent routes, the deepest reach in doors, and any room a househo
 cross. `tryGenerate` composes several candidates and keeps the one that walks best. The studio shows the
 score beside the plan name and the door-by-door walk from the entrance for whichever room is selected.
 
+## Choosing between compositions
+
+The ranker used to return the first candidate that merely stood up without a forced crossing, whatever it
+looked like — so a composition strung out in a chain of sheds was accepted as readily as a building. Every
+candidate a seed is worth is now composed and the best of them kept, on two reports rather than one.
+
+`lib/navigation.ts` asks whether you can get there. It now also counts the **compromises**: doors the access
+grammar would not have chosen, cut only because nothing else reached — service into the body of the hall, a
+chapel opening onto a chamber, a door into the middle of the hall's flank. A plan needing several of them is
+connected but compromised, and the score says so.
+
+`lib/composition.ts` asks whether the thing you are getting around is a building. It measures how far the
+composition **reaches** from the hall in volumes, what share of its ground it actually uses, how many yards
+it holds and addresses, the **hierarchy** between its principal room and its median one, and the share of
+rooms with an outside wall — a room with none can never have a window, and that is a massing question rather
+than a window one. Each dimension is bounded on its own so none of them can buy off another.
+
+`tryGenerate` ranks on `navigation × 2 + composition`: a forced crossing is the defect this generator exists
+to avoid, but between two plans that both walk, the one that is a building wins. It composes the ordinary
+budget of candidates — five, or three on a large site, because the fifth is worth about a point of rank and
+the eighth barely half of one — and keeps composing past that only while nothing yet walks without a forced
+crossing, which is where the effort belongs. Ranking happens on what is cheap to know; only the best
+candidate in turn is voxelised for the built check, which costs more than composing them all.
+
+The studio shows both scores with their components beside the plan name.
+
 ## What the estate has to house, and how it is set on the ground
 
 Growth used to be a count: every twenty-four blocks of budget bought one more rectangle of `22–30 × 30–38`,
