@@ -659,12 +659,38 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       [['Treasury','storage'],['Clerk’s room','study'],['Seal room','study'],['Strong room','storage']],
     ],
   };
+  /**
+   * What a range holds above its ground floor. An upper storey that is bedchambers whatever the range is
+   * flattens the hierarchy the composition just built: the lord's own floor, a guest floor and the servants'
+   * floor are different accommodation, and a range's second storey is not a copy of its first.
+   */
+  const UPPER:Partial<Record<ComponentKind,[string,RoomKind][][]>>={
+    domestic:[
+      [['Great chamber','bedroom'],['Antechamber','study'],['Closet','study'],['Wardrobe','storage']],
+      [['Bedchamber','bedroom'],['Dressing room','study'],['Nurse’s chamber','bedroom'],['Linen room','storage']],
+      [['Private study','study'],['Muniment closet','storage'],['Bedchamber','bedroom'],['Press','storage']],
+    ],
+    lodging:[
+      [['Guest chamber','bedroom'],['Guest parlour','study'],['Servant’s cot','bedroom'],['Guest wardrobe','storage']],
+      [['Upper lodging','bedroom'],['Attic chamber','bedroom'],['Trunk room','storage'],['Press','storage']],
+    ],
+    service:[
+      [['Servants’ lodging','bedroom'],['Maids’ chamber','bedroom'],['Household store','storage'],['Press','storage']],
+      [['Grooms’ lodging','bedroom'],['Mess room','service'],['Kit store','storage'],['Boot room','storage']],
+    ],
+    workshop:[
+      [['Drying loft','storage'],['Apprentice’s room','bedroom'],['Pattern store','storage'],['Press','storage']],
+      [['Store loft','storage'],['Journeyman’s room','bedroom'],['Sail loft','storage'],['Rope store','storage']],
+    ],
+  };
   function programFor(c:BuildingComponent,f:number):[string,RoomKind][]{
     if(f<0)return [['Wine cellar','storage'],['Root store','storage'],['Strong room','storage'],['Buttery store','storage'],['Ice store','storage']];
-    const variants=VARIANTS[c.kind];
-    if(f===0&&variants)return variants[(rankInKind.get(c.id)??0)%variants.length];
+    const rank=rankInKind.get(c.id)??0,variants=VARIANTS[c.kind];
+    if(f===0&&variants)return variants[rank%variants.length];
     if(c.kind==='tower'&&f>0)return [[f===c.storeys-1?'Tower chamber':'Solar chamber','bedroom'],['Antechamber','study'],['Wardrobe','storage'],['Guest chamber','bedroom'],['Linen room','storage']];
     if(f===c.storeys-1&&f>1)return [['Gabled bedchamber','bedroom'],['Wardrobe & study','study'],['Bedchamber','bedroom'],['Linen room','storage'],['Private study','study']];
+    const above=UPPER[c.kind];
+    if(above)return above[(rank+f-1)%above.length];
     return [['Bedchamber','bedroom'],['Guest chamber','bedroom'],['Linen room','storage'],['Nurse’s chamber','bedroom'],['Wardrobe','storage']];
   }
   for(const c of components)if(c.storeys>1&&c.kind!=='hall'&&c.kind!=='court'&&!canStair(c)){c.storeys=1;c.topY=6;}
@@ -1202,6 +1228,12 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   }
   for(const y of [...new Set(p.rooms.map(r=>r.floorY))].sort((a,b)=>a-b)){
     const voids=components.filter(c=>c.kind==='hall'&&y>0&&y<c.topY).map(c=>({id:`void-${c.id}-${y}`,name:'Open to hall below',bounds:c.bounds,polygon:c.polygon,holes:p.rooms.filter(r=>r.componentId===c.id&&r.floorY===y).map(r=>r.bounds),floorY:y,ceilingY:c.topY}));
+    // The floor a stair comes up through is a hole in the storey above it, and a hole is a void: it is
+    // drawn as one and annotated as one rather than left as an unexplained gap in the boards.
+    for(const st of p.stairs.filter(st=>st.toY===y)){
+      const well={x:st.bounds.x+3,z:st.bounds.z+3,w:2,d:6};
+      voids.push({id:`well-${st.id}`,name:'Open to the stair below',bounds:well,polygon:rectPolygon(well),holes:[],floorY:y,ceilingY:y+6});
+    }
     p.floors.push({index:y/6,name:y<0?'Cellar':y===0?'Ground floor':y===6?'First floor':y===12?'Second floor':`Floor ${y/6+1}`,elevation:y,rooms:p.rooms.filter(r=>r.floorY===y),voids,roofComponents:components.filter(c=>c.topY<=y).map(c=>c.id)});
   }
   if(!small&&!quadrangle&&(s.kind==='castle'||s.courtyard||['courtyard-manor','palace','double-ward'].includes(family))){

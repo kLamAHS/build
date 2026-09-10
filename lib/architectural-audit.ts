@@ -42,6 +42,16 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
     if(Math.max(w,d)>Math.min(w,d)*3.2)issues.push(`${where} is a ${w} by ${d} strip rather than a room.`);
     if(w*d>760)issues.push(`${where} has swallowed ${w*d} blocks of its range.`);
   }
+  // A door may not open onto a void. The route test would catch it as a missing floor, but a household
+  // walking off a landing into the stair well deserves to be told what it is rather than that a route failed.
+  for(const r of plan.rooms)for(const h of r.holes)for(const o of plan.openings){
+    if(o.type==='window'||!o.roomIds.includes(r.id))continue;
+    const near=o.axis==='x'?{x:o.x+1,z:o.z}:{x:o.x,z:o.z+1},far=o.axis==='x'?{x:o.x-2,z:o.z}:{x:o.x,z:o.z-2};
+    const step=insidePolygon(near.x+1,near.z+1,r.polygon)?near:far;
+    for(let dx=0;dx<2;dx++)for(let dz=0;dz<2;dz++)
+      if(step.x+dx>=h.x&&step.x+dx<=h.x+h.w&&step.z+dz>=h.z&&step.z+dz<=h.z+h.d)
+        issues.push(`The ${o.type} into ${r.name} (${r.componentId}, Y ${r.floorY}) opens onto the well the stair comes up through.`);
+  }
   for(const c of plan.chimneys)for(let y=c.fromY;y<c.toY;y++)if(grid.material(c.bounds.x,y,c.bounds.z)!==8)issues.push('A chimney stack is discontinuous.');
   return [...new Set(issues)];
 }

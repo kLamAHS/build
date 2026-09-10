@@ -146,6 +146,24 @@ so these are real geometry rather than a drawing convention. Two rules bound the
 straight four-block run of wall to receive its door, and its floor never pinches below the two walkable
 blocks a household needs.
 
+## What stands above the ground floor
+
+Every storey above the first used to hold the same accommodation whatever the range was for: bedchambers,
+guest chambers and wardrobes, in a building whose ground floor had just been given a solar, a brewhouse and a
+smithy. That flattens the hierarchy the composition built.
+
+A range's upper storeys now carry accommodation of their own, chosen by what the range is and which storey it
+is. A domestic range gives its first floor to the great chamber with its antechamber and closet and its
+second to bedchambers and dressing rooms; a lodging range gives one floor to guests and the next to attic
+lodgings; a service range houses the servants and grooms above its work; a workshop keeps its drying and
+store lofts. Across a 24-plan survey there are 32 kinds of room above ground where there were 12, and the
+commonest is one room in ten rather than one in five.
+
+The hole a stair comes up through is a void, and is drawn as one: its own perimeter, its hatch, and an
+annotation, rather than an unexplained grey gap in the boards. The audit rejects a plan where a door opens
+onto one — the route test would have caught it as a missing floor, but a household walking off a landing into
+the stair well deserves to be told what it is.
+
 ## Wall mass
 
 A wall one block thick whatever it carries reads as a line rather than as masonry, and the drawing has to

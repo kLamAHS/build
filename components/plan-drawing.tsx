@@ -124,8 +124,12 @@ export function PlanDrawing({plan,floor,options,selected,onSelect,prefix='plan',
       <text x={c.gatehouse.x+c.gatehouse.w/2} y={c.gatehouse.z-1.6} textAnchor="middle" fontFamily="Georgia" fontSize="2.2" fill="#6f7560">Gatehouse</text>
       <text x={c.bounds.x+c.bounds.w*.72} y={c.bounds.z+c.bounds.d*.42} fontSize="2.6" fontFamily="Georgia" fontStyle="italic" fill="#8b957a" textAnchor="middle">{c.name}</text>
     </g>)}
-    {floor.voids.map(v=><g key={v.id}><path d={polygonPath(v.polygon)+v.holes.map(h=>rectPath(h.x,h.z,h.w,h.d)).join('')} fill={`url(#${prefix}-void)`} fillRule="evenodd" stroke="#aa9c81" strokeWidth=".2" strokeDasharray="1 1"/><text x={v.bounds.x+v.bounds.w/2} y={v.bounds.z+v.bounds.d/2} textAnchor="middle" fontFamily="Georgia" fontSize="1.5" fontStyle="italic" fill="#9a8460">Open to hall below<tspan x={v.bounds.x+v.bounds.w/2} dy="2">{v.ceilingY} block ceiling</tspan></text></g>)}
-    {floor.rooms.map(r=><g key={r.id}><path d={polygonPath(r.polygon)} fill={options.colors?ROOM_COLORS[r.kind]:'#eee4cd'}/><path d={polygonPath(r.polygon)} fill={`url(#${prefix}-wood)`}/>{r.holes.map((h,i)=><rect key={i} x={h.x} y={h.z} width={h.w+1} height={h.d+1} fill="#b0b4a4"/>)}{options.furniture&&<Furniture room={r}/>}</g>)}
+    {floor.voids.map(v=>{
+      // A well is too small to carry a caption; its guarded edge and its hatch say what it is.
+      const small=v.bounds.w*v.bounds.d<60;
+      return <g key={v.id}><path d={polygonPath(v.polygon)+v.holes.map(h=>rectPath(h.x,h.z,h.w,h.d)).join('')} fill={`url(#${prefix}-void)`} fillRule="evenodd" stroke="#aa9c81" strokeWidth={small?.35:.2} strokeDasharray={small?undefined:'1 1'}/>
+        {!small&&<text x={v.bounds.x+v.bounds.w/2} y={v.bounds.z+v.bounds.d/2} textAnchor="middle" fontFamily="Georgia" fontSize="1.5" fontStyle="italic" fill="#9a8460">{v.name}<tspan x={v.bounds.x+v.bounds.w/2} dy="2">{v.ceilingY} block ceiling</tspan></text>}</g>;})}
+    {floor.rooms.map(r=><g key={r.id}><path d={polygonPath(r.polygon)} fill={options.colors?ROOM_COLORS[r.kind]:'#eee4cd'}/><path d={polygonPath(r.polygon)} fill={`url(#${prefix}-wood)`}/>{options.furniture&&<Furniture room={r}/>}</g>)}
     <path d={walls} fill="#707566"/>
     {plan.openings.filter(o=>o.y<=y+3&&o.y+o.height>y+1).map(o=>{const isX=o.axis==='x',d=o.width;return <g key={o.id}>{!layer&&<rect x={o.x} y={o.z} width={isX?1:d} height={isX?d:1} fill={o.type==='window'?'#b9d5d6':'#ede6d5'}/>}<path d={o.type==='window'?(isX?`M${o.x+.5} ${o.z}v${d}`:`M${o.x} ${o.z+.5}h${d}`):(isX?`M${o.x+.5} ${o.z}h${d}a${d} ${d} 0 0 1 ${-d} ${d}`:`M${o.x} ${o.z+.5}v${d}a${d} ${d} 0 0 0 ${d} ${-d}`)} fill="none" stroke={o.type==='window'?'#597e84':'#8d7c5f'} strokeWidth=".15"/></g>;})}
     {plan.stairs.filter(st=>st.fromY===y||st.toY===y).map(st=>{

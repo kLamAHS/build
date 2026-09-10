@@ -256,6 +256,28 @@ void test('ordinary rooms keep their proportions: no strip a wing long, nothing 
   assert.ok(worstShape<=3.2,`the longest ordinary room is ${worstShape.toFixed(1)} times its width: ${shape}`);
   assert.ok(worstSize<=760,`the largest ordinary room has taken ${worstSize} blocks: ${size}`);
 });
+void test('an upper storey is accommodation of its own, and a stair comes up into a well that is drawn',()=>{
+  // The defect this answers: every floor above the ground one filled with bedchambers and wardrobes whatever
+  // the range was for, and the hole a stair comes up through left as an unexplained grey gap in the boards.
+  const names=new Map<string,number>();let rooms=0;
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind])for(const size of [128,256]){
+    const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size,floors:4,seed:'ABOVE'});
+    for(const st of p.stairs){
+      const above=p.floors.find(f=>f.elevation===st.toY);
+      assert.ok(above?.voids.some(v=>v.id===`well-${st.id}`),`${family.id}/${size}: ${st.id} comes up into a floor with no well drawn`);
+    }
+    // A door onto a well is a fall, and the audit rejects it; every plan returned has already passed that.
+    assert.deepEqual(auditArchitecture(p),[],`${family.id}/${size}: the plan returned does not pass its own audit`);
+    for(const r of p.rooms){
+      if(r.floorY<=0||isCirculation(r))continue;
+      rooms++;const base=r.name.replace(/ \d+$/,'');names.set(base,(names.get(base)??0)+1);
+    }
+  }
+  assert.ok(rooms>300,`only ${rooms} rooms above the ground floor surveyed`);
+  assert.ok(names.size>=24,`only ${names.size} kinds of room above the ground floor`);
+  const commonest=Math.max(...names.values());
+  assert.ok(commonest/rooms<=0.15,`${(100*commonest/rooms).toFixed(0)}% of the rooms above ground are the same room`);
+});
 void test('a wall is divided into bays before anything is cut into it',()=>{
   // The defect this answers: one window every seven blocks from each room's own corner, the same size for a
   // pantry as for a great hall, and an upper storey whose lights fell wherever that floor's rooms divided.
