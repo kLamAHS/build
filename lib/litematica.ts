@@ -1,4 +1,5 @@
 import { voxelize, type SparseBlocks } from './voxels.ts';
+import { dress, type BlockState } from './dressing.ts';
 import { type Floor, type Plan } from './model.ts';
 
 /**
@@ -61,7 +62,7 @@ function payload(w:Writer,tag:Nbt):void {
 }
 
 /** One region of blocks: a palette, and an index into it for every cell of a box. */
-export type Schematic={name:string;description:string;size:{x:number;y:number;z:number};palette:string[];cells:Uint16Array};
+export type Schematic={name:string;description:string;size:{x:number;y:number;z:number};palette:BlockState[];cells:Uint16Array};
 export const cellIndex=(size:Schematic['size'],x:number,y:number,z:number)=>(y*size.z+z)*size.x+x;
 
 /**
@@ -107,7 +108,9 @@ export function nbtBytes(schematic:Schematic,when=Date.now()){
       [schematic.name]:compound({
         Position:xyz(0,0,0),
         Size:xyz(size.x,size.y,size.z),
-        BlockStatePalette:{t:'list',of:TAG.compound,v:palette.map(block=>compound({Name:str(block)}))},
+        BlockStatePalette:{t:'list',of:TAG.compound,v:palette.map(block=>compound(block.props
+          ?{Name:str(block.name),Properties:compound(Object.fromEntries(Object.entries(block.props).map(([k,v])=>[k,str(v)])))}
+          :{Name:str(block.name)}))},
         BlockStates:{t:'longArray',words:packBlockStates(cells,bits)},
         Entities:{t:'list',of:TAG.compound,v:[]},
         TileEntities:{t:'list',of:TAG.compound,v:[]},
@@ -137,7 +140,7 @@ export const BLOCKS:Record<number,string>={
   5:'minecraft:white_terracotta',6:'minecraft:cobblestone',7:'minecraft:grass_block',8:'minecraft:bricks',
   9:'minecraft:oak_log',
 };
-export const OUTLINE_BLOCKS=['minecraft:air','minecraft:stone_bricks','minecraft:glass','minecraft:oak_planks'];
+export const OUTLINE_BLOCKS:BlockState[]=[{name:'minecraft:air'},{name:'minecraft:stone_bricks'},{name:'minecraft:glass'},{name:'minecraft:oak_planks'}];
 
 /**
  * One floor's walls as a single course, to lay out on the ground and build up from. It is read at head
@@ -166,18 +169,14 @@ export function floorOutline(plan:Plan,floor:Floor,grid:SparseBlocks=voxelize(pl
     size,palette:OUTLINE_BLOCKS,cells};
 }
 
-/** The whole estate, every block of it, for pasting rather than tracing. */
+/**
+ * The whole estate, every block of it, dressed — which is what makes it worth pasting rather than tracing.
+ * The massing comes from the plan and the material from `lib/dressing.ts`; see there for why a wall is nine
+ * stones rather than one and why a fifth of what is placed is stairs and slabs.
+ */
 export function wholeBuilding(plan:Plan,grid:SparseBlocks=voxelize(plan)):Schematic {
-  const b=plan.bounds,low=plan.minY,size={x:b.w,y:plan.maxY-low+1,z:b.d};
-  const used=[...new Set(plan.blocks.filter(k=>k.material).map(k=>k.material))].sort((m,n)=>m-n);
-  const palette=['minecraft:air',...used.map(m=>BLOCKS[m]??'minecraft:stone')];
-  const slot=new Map(used.map((m,i)=>[m,i+1]));
-  const cells=new Uint16Array(size.x*size.y*size.z);
-  for(let y=0;y<size.y;y++)for(let z=0;z<size.z;z++)for(let x=0;x<size.x;x++){
-    const material=grid.material(b.x+x,low+y,b.z+z);
-    if(material)cells[cellIndex(size,x,y,z)]=slot.get(material)??0;
-  }
+  const {size,palette,cells,lights}=dress(plan,grid);
   return {name:plan.name.replace(/[^\w -]/g,''),
-    description:`${plan.name}, every block. ${plan.settings.kind} · ${plan.family} · seed ${plan.settings.seed}. Y ${low} is the lowest course.`,
+    description:`${plan.name}, every block. ${plan.settings.kind} · ${plan.family} · seed ${plan.settings.seed}. Y ${plan.minY} is the lowest course. ${lights} lights.`,
     size,palette,cells};
 }

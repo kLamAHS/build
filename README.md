@@ -203,10 +203,8 @@ so it reads without a legend:
 
 Lay it out, and build up from it. A 512-block estate's outline is about 3 kB.
 
-**Complete building** is every block of every floor, mapped from the plan's own materials — masonry to stone
-brick, timber to oak planks, plaster to white terracotta, roofing to grey terracotta, glass to glass, paving
-to cobblestone, garden to grass, hearths to brick and furnishings to oak log. About 90 kB for the largest
-estate the generator makes.
+**Complete building** is every block of every floor, **dressed** — see *Dressing a build* below. About 220 kB
+for the largest estate the generator makes, and half a second to prepare.
 
 Both are gzipped NBT written by `lib/litematica.ts`, which writes the tags this one format needs and no
 others. Two deliberate choices are in there:
@@ -246,6 +244,55 @@ composition tried:
 - A **hall** keeps its long axis, its dais at the high end, its screens at the serving end, and its service
   doors out of the private half.
 - A **yard** is a way through, not a dead end with a gate on it.
+
+## Dressing a build
+
+The generator settles what stands where. Until now the exporter settled what it was made of by mapping each
+of nine materials to one block, which produced a massing model: one grey stone, flat roofs of cubes, walls of
+solid glass, and — worse than any of that — no light anywhere in it. A castle you cannot see inside is a
+castle full of monsters by the second night.
+
+`lib/dressing.ts` is the pass that answers that. Its rules come from reading two hand-built castles block by
+block and counting what is in them. Three things separate those from what a generator produces on its own:
+
+**The stone is never one stone.** Between twelve and thirty-five stone blocks are in use, and they are not
+salt-and-pepper: a neighbouring block is the same one about half the time, where random mixing at that palette
+size would be three to eight per cent. So the stone here comes from a patchy field — a couple of blocks of one
+stone, then a couple of another — with about an eighth of it weathered to a cracked or mossy variant. Each
+kind of building has its own set: a castle is tuff and deepslate and hard grey, a house the cobble and stone
+of the fields round it. Corners take one stone all the way up, because a quoin is what tells the eye where
+the mass ends.
+
+**A fifth of every block placed is trim**, concentrated in courses. So: a plinth carried one block proud of
+the wall and chamfered back with a course of stairs; a string course of projecting slabs at every storey
+line; a corbel table under the eaves, which is what stops a wall meeting a roof as two flat planes butted
+together; and roofs built out of stairs facing up the pitch rather than out of cubes.
+
+**They are lit.** A hundred and fifty lanterns in a building thirty-seven blocks across. Every room now hangs
+lanterns from its ceiling on a six-block grid, and every fire is a fire: a hearth is brick with a lit campfire
+in it, an oven a furnace, a forge a blast furnace and an anvil.
+
+The rest of the fittings became what they are, too, since a room named for what happens in it should hold the
+thing that happens in it: bookshelves and a lectern or an enchanting table, a brewing stand, barrels, a
+crafting table, a bed, benches of stairs, glass **panes** rather than walls of glass block.
+
+How it measures against the two references, counted the same way:
+
+| | Raidproof Castle | Skyhold Keep | Keepwright before | Keepwright now |
+|---|---|---|---|---|
+| stone blocks in use | 12 | 35 | 1 | **15** |
+| same block above | 56% | 42% | 100% | **55%** |
+| stairs | 14.4% | 7.0% | 0% | **10.5%** |
+| slabs | 12.6% | 8.0% | 0% | **5.1%** |
+| light sources | ~150 | many | **0** | **189** |
+| palette | 569 | 1128 | 9 | **113** |
+
+Slabs are still the thin one, and the palette is a fifth the size of a hand-built castle's — there is no
+furniture variety, no banners, no vines, no broken masonry. What is here is the structure of a good build
+rather than the finish of one.
+
+**The studio's own 3D view is not dressed.** It still colours by the nine materials, because it renders from
+the voxel grid and the dressing is a separate pass over it. The export is what changed.
 
 ## Choosing between the compositions a seed made
 
