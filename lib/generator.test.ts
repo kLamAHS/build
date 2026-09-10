@@ -1005,3 +1005,53 @@ void test('a player’s rooms are built like any other, and only when the estate
   assert.ok(withLibrary>=plans*.25,`only ${withLibrary} of ${plans} estates hold a library without being asked`);
   assert.ok(fixtures>=withPlayer,`${fixtures} fixtures across ${withPlayer} estates`);
 });
+
+void test('the search keeps the compositions it did not choose',()=>{
+  // The defect this answers: a seed composed several estates, the best of them was returned, and the rest
+  // were thrown away — so the one number a reader could act on was the seed, and the only way to see another
+  // composition was to lose the one they had.
+  let plans=0,alternatives=0,differing=0,rebuilt=0,refused=0;
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind])for(const size of [160,288]){
+    const settings={...DEFAULT_SETTINGS,kind,family:family.id,size,floors:3,seed:'ALTERNATIVE'};
+    const result=tryGenerate(settings);
+    assert.ok(result.ok,`${family.id}/${size}: ${result.ok?'':result.error}`);
+    if(!result.ok)continue;
+    plans++;
+    const tag=`${family.id}/${size}`;
+    const list=result.alternatives;
+    assert.ok(list.length,`${tag}: the search kept nothing`);
+    alternatives+=list.length;
+    assert.equal(new Set(list.map(a=>a.attempt)).size,list.length,`${tag}: two alternatives share an attempt`);
+    const chosen=list.filter(a=>a.state==='chosen');
+    assert.equal(chosen.length,1,`${tag}: ${chosen.length} of them are the one returned`);
+    assert.equal(chosen[0].volumes,result.plan.components.length,`${tag}: the chosen entry does not describe the plan`);
+    assert.equal(chosen[0].navigation,result.plan.navigation.score);
+    assert.equal(chosen[0].composition,result.plan.composition.score);
+    // Ranked in the order the search ranks them, so the list reads top down.
+    for(let i=1;i<list.length;i++)assert.ok(list[i-1].rank>=list[i].rank,`${tag}: the list is not in rank order`);
+    for(const a of list){
+      assert.ok(a.attempt>=0&&Number.isInteger(a.attempt),`${tag}: attempt ${a.attempt}`);
+      if(a.state==='rejected')assert.ok(a.issue,`${tag}: an alternative refused for no stated reason`);
+    }
+    // The same attempt of the same seed builds the same estate, which is what makes the list usable at all.
+    for(const a of list.filter(a=>a.state!=='rejected').slice(0,3)){
+      const again=tryGenerate(settings,a.attempt);
+      if(!again.ok){
+        // A composition that will not stand comes back saying what is wrong and what to change.
+        refused++;
+        assert.ok(/does not stand up/.test(again.error),`${tag}: ${again.error}`);
+        assert.ok(/footprint|storeys|seed|court/.test(again.error),`${tag}: no relaxation proposed: ${again.error}`);
+        assert.ok(/previous build is retained/.test(again.error),`${tag}: no reassurance: ${again.error}`);
+        continue;
+      }
+      rebuilt++;
+      assert.equal(again.plan.components.length,a.volumes,`${tag}: attempt ${a.attempt} rebuilt differently`);
+      if(a.state==='chosen')assert.equal(again.plan.signature,result.plan.signature,`${tag}: the chosen attempt does not rebuild itself`);
+      else if(again.plan.signature!==result.plan.signature)differing++;
+    }
+  }
+  assert.ok(alternatives>=plans*2,`only ${alternatives} compositions kept across ${plans} seeds`);
+  assert.ok(rebuilt>=plans,`only ${rebuilt} of them rebuild from their attempt number`);
+  assert.ok(differing>=plans*.5,`only ${differing} alternatives differ from the one chosen, so the list is a list of copies`);
+  void refused;
+});
