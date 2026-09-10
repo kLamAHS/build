@@ -20,6 +20,25 @@ export type Composition={
   score:number;
 };
 
+/**
+ * Where the bays fall on a range's walls: a pier at each corner, then an even rhythm at about six blocks —
+ * seven for a tower, heavier piers on a castle, and nothing inside a chamfered corner. One description,
+ * used by the generator to place its openings and by the drawing to show where it put them.
+ */
+export function bayLines(c:BuildingComponent,castle:boolean){
+  const chamfer=c.kind==='tower'?Math.min(4,Math.floor(c.bounds.w/5)):0;
+  const pier=Math.max(castle?3:2,chamfer+1),target=c.kind==='tower'?7:6;
+  const centres=(from:number,to:number)=>{
+    const span=to-from-2*pier,out:number[]=[];
+    if(span<4)return out;
+    const count=Math.max(1,Math.round(span/target));
+    for(let i=0;i<count;i++)out.push(from+pier+Math.round(span*(i+.5)/count));
+    return out;
+  };
+  const b=c.bounds;
+  return {pier,target,x:centres(b.x,b.x+b.w),z:centres(b.z,b.z+b.d)};
+}
+
 /** Two footprints share a wall when one's edge is the other's and they overlap along it. */
 export function abut(a:Rect,b:Rect){
   const lapZ=Math.min(a.z+a.d,b.z+b.d)-Math.max(a.z,b.z),lapX=Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x);

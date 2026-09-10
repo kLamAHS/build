@@ -1,9 +1,93 @@
 'use client';
 import { Children, cloneElement, isValidElement, type ReactNode, type ReactElement } from 'react';
 import { ROOM_COLORS, type Floor, type Plan, type Room, type Point } from '@/lib/model';
+import { abut, bayLines } from '@/lib/composition';
 import type { BlockLayer } from '@/lib/voxels';
 
-export type DrawingOptions={labels:boolean;furniture:boolean;grid:boolean;dimensions:boolean;colors:boolean};
+/** The stages a drawing can be asked to show its working for, so a defect can be traced to the one that made it. */
+export type Diagnostic='off'|'volumes'|'circulation'|'facade'|'fit';
+export const DIAGNOSTICS:{id:Diagnostic;name:string;hint:string}[]=[
+  {id:'off',name:'None',hint:'The finished drawing'},
+  {id:'volumes',name:'Volumes',hint:'What was composed, and how far each range stands from the hall'},
+  {id:'circulation',name:'Circulation',hint:'Every doorway, how many you cross to reach a room, and any forced crossing'},
+  {id:'facade',name:'Facade bays',hint:'The bay lines each wall was divided into, and which took a light'},
+  {id:'fit',name:'Room fit',hint:'How near each room stands to the proportion and area it is allowed'},
+];
+export type DrawingOptions={labels:boolean;furniture:boolean;grid:boolean;dimensions:boolean;colors:boolean;diagnostics?:Diagnostic};
+// The limits the audit rejects a candidate on, so the overlay shows the same line the generator is held to.
+const ASPECT_LIMIT=3.2,AREA_LIMIT=760;
+const ORDINARY=new Set(['bedroom','study','service','storage']);
+function Diagnostics({plan,floor,mode}:{plan:Plan;floor:Floor;mode:Diagnostic}){
+  const y=floor.elevation;
+  if(mode==='volumes'){
+    const hall=plan.components.find(c=>c.kind==='hall');
+    const depth=new Map<string,number>();
+    if(hall){
+      depth.set(hall.id,0);const queue=[hall];
+      for(let i=0;i<queue.length;i++)for(const o of plan.components)
+        if(!depth.has(o.id)&&abut(queue[i].bounds,o.bounds)){depth.set(o.id,depth.get(queue[i].id)!+1);queue.push(o);}
+    }
+    const halo={paintOrder:'stroke',stroke:'#f4eedd',strokeWidth:.55} as const;
+    return <g fontFamily="ui-monospace,monospace" pointerEvents="none">
+      {plan.components.map(c=>{
+        const b=c.bounds,long=Math.max(b.w,b.d),short=Math.min(b.w,b.d);
+        const form=long>=short*1.7?'range':long>=short*1.25?'block':'square';
+        const away=depth.get(c.id);
+        return <g key={c.id} opacity={c.baseY<=y&&y<c.topY?1:.35}>
+          <rect x={b.x} y={b.z} width={b.w} height={b.d} fill={c.kind==='court'?'#4a7fb51a':'#4a7fb50d'} stroke="#3d6f9e" strokeWidth=".4" strokeDasharray={c.kind==='court'?'2 1.4':undefined}/>
+          <text x={b.x+1} y={b.z+3} fontSize="1.6" fill="#2f5c85" style={halo}>{c.kind}</text>
+          <text x={b.x+1} y={b.z+5.2} fontSize="1.3" fill="#5b7f9e" style={halo}>{b.w}×{b.d} · {form} · {c.storeys}s{away===undefined?' · adrift':away?` · ${away} from hall`:' · hall'}</text>
+        </g>;})}
+      {plan.components.flatMap((c,i)=>plan.components.slice(i+1).filter(o=>abut(c.bounds,o.bounds)).map(o=>
+        <line key={`${c.id}-${o.id}`} x1={c.bounds.x+c.bounds.w/2} y1={c.bounds.z+c.bounds.d/2} x2={o.bounds.x+o.bounds.w/2} y2={o.bounds.z+o.bounds.d/2} stroke="#3d6f9e" strokeWidth=".35" opacity=".5"/>))}
+    </g>;
+  }
+  if(mode==='circulation'){
+    const byId=new Map(plan.rooms.map(r=>[r.id,r]));
+    const near=new Map(plan.rooms.map(r=>[r.id,[] as string[]]));
+    for(const [a,c] of plan.connections){near.get(a)?.push(c);near.get(c)?.push(a);}
+    const start=plan.openings.find(o=>o.type==='entrance')?.roomIds[0];
+    const away=new Map<string,number>();
+    if(start){away.set(start,0);const queue=[start];for(let i=0;i<queue.length;i++)for(const next of near.get(queue[i])!)if(!away.has(next)){away.set(next,away.get(queue[i])!+1);queue.push(next);}}
+    const forced=new Set(plan.navigation.transits.map(t=>t.roomId));
+    const at=(id:string)=>{const r=byId.get(id);return r?{x:r.bounds.x+r.bounds.w/2,z:r.bounds.z+r.bounds.d/2}:undefined;};
+    return <g pointerEvents="none" fontFamily="ui-monospace,monospace">
+      {plan.connections.map(([a,c],i)=>{const m=at(a),n=at(c);
+        if(!m||!n||byId.get(a)!.floorY!==y||byId.get(c)!.floorY!==y)return null;
+        return <line key={i} x1={m.x} y1={m.z} x2={n.x} y2={n.z} stroke="#8a5a2b" strokeWidth=".3" opacity=".65"/>;})}
+      {floor.rooms.map(r=>{const c=at(r.id)!;const d=away.get(r.id);
+        return <g key={r.id}>
+          <circle cx={c.x} cy={c.z} r={forced.has(r.id)?1.6:1} fill={forced.has(r.id)?'#b4472e':r.kind==='circulation'||r.kind==='stairs'||r.kind==='court'?'#6f8f5e':'#c9a55f'} stroke="#4a3b26" strokeWidth=".2"/>
+          <text x={c.x} y={c.z+.55} fontSize="1.4" textAnchor="middle" fill="#2c2418">{d??'—'}</text>
+        </g>;})}
+    </g>;
+  }
+  if(mode==='facade'){
+    const castle=plan.settings.kind==='castle';
+    const cut=new Set(plan.openings.filter(o=>o.type==='window').map(o=>`${(o.axis==='z'?o.x:o.z)+Math.floor(o.width/2)}:${o.axis}`));
+    return <g pointerEvents="none">
+      {plan.components.filter(c=>c.kind!=='court'&&c.baseY<=y&&y<c.topY).flatMap(c=>{
+        const b=c.bounds,l=bayLines(c,castle);
+        return [
+          ...l.x.flatMap(at=>[b.z,b.z+b.d].map((z,i)=>
+            <line key={`${c.id}x${at}${i}`} x1={at} y1={z-1.4} x2={at} y2={z+1.4} stroke={cut.has(`${at}:z`)?'#2f7a52':'#b06a3a'} strokeWidth=".45"/>)),
+          ...l.z.flatMap(at=>[b.x,b.x+b.w].map((x,i)=>
+            <line key={`${c.id}z${at}${i}`} x1={x-1.4} y1={at} x2={x+1.4} y2={at} stroke={cut.has(`${at}:x`)?'#2f7a52':'#b06a3a'} strokeWidth=".45"/>)),
+          <rect key={`${c.id}p`} x={b.x+l.pier} y={b.z+l.pier} width={Math.max(0,b.w-2*l.pier)} height={Math.max(0,b.d-2*l.pier)} fill="none" stroke="#b06a3a" strokeWidth=".18" strokeDasharray="1 1.6" opacity=".55"/>,
+        ];})}
+    </g>;
+  }
+  return <g pointerEvents="none" fontFamily="ui-monospace,monospace">
+    {floor.rooms.map(r=>{
+      const w=r.bounds.w-1,d=r.bounds.d-1,aspect=Math.max(w,d)/Math.max(1,Math.min(w,d)),area=w*d;
+      const ordinary=ORDINARY.has(r.kind);
+      const strain=ordinary?Math.max(aspect/ASPECT_LIMIT,area/AREA_LIMIT):0;
+      return <g key={r.id}>
+        <path d={polygonPath(r.polygon)} fill={strain>=1?'#b4472e55':strain>=.75?'#d99a4a44':strain>=.5?'#c9bb6a33':'#6f8f5e22'}/>
+        <text x={r.bounds.x+r.bounds.w/2} y={r.bounds.z+r.bounds.d/2+3.4} fontSize="1.3" textAnchor="middle" fill="#4a3b26" style={{paintOrder:'stroke',stroke:'#f4eedd',strokeWidth:.55}}>{w}×{d} · {aspect.toFixed(1)}:1{ordinary?` · ${Math.round(strain*100)}%`:''}</text>
+      </g>;})}
+  </g>;
+}
 export function preciseSvg(node:ReactNode):ReactNode {return Children.map(node,child=>{if(!isValidElement(child))return child;const el=child as ReactElement<Record<string,unknown>>,props:Record<string,unknown>={};if(typeof el.type==='string')for(const [k,v] of Object.entries(el.props)){if(typeof v==='number'&&Number.isFinite(v))props[k]=Number(v.toFixed(5));else if(typeof v==='string'&&['d','transform','points','viewBox'].includes(k))props[k]=v.replace(/-?\d+(?:\.\d+)?(?:e[-+]?\d+)?/gi,n=>String(Number(Number(n).toFixed(5))));}if(el.props.children!==undefined)props.children=preciseSvg(el.props.children as ReactNode);return cloneElement(el,props);});}
 const polygonPath=(p:Point[])=>p.length?`M${p.map(v=>`${v.x},${v.z}`).join('L')}Z`:'';
 const rectPath=(x:number,z:number,w:number,d:number)=>`M${x} ${z}h${w}v${d}h${-w}Z`;
@@ -55,6 +139,7 @@ export function PlanDrawing({plan,floor,options,selected,onSelect,prefix='plan',
         </text>
       </g>;})}
     {options.grid&&<rect x={b.x} y={b.z} width={b.w} height={b.d} fill={`url(#${prefix}-grid)`} pointerEvents="none"/>}
+    {options.diagnostics&&options.diagnostics!=='off'&&<><rect x={b.x} y={b.z} width={b.w} height={b.d} fill="#f4eeddc4" pointerEvents="none"/><Diagnostics plan={plan} floor={floor} mode={options.diagnostics}/></>}
     {(()=>{const named=new Set<string>();return floor.rooms.map(r=>{
       const generic=r.name==='Passage'||r.name==='Cross passage'||r.name==='Landing'||r.name==='Upper landing'||r.name==='Cellar passage';
       const key=`${r.componentId}:${r.name}`;

@@ -8,7 +8,7 @@ Use Node 22.13 or later, `npm install`, and `npm run dev`. Run `npm run build` t
 
 ## Checks
 
-`npm test` checks deterministic generation, 3,150 combinations of footprints and room geometry, aligned floors, size-dependent room counts, feature options, agent-tool input contracts, and the circulation rules below. `npx tsc --noEmit` checks types.
+`npm test` checks deterministic generation, 3,150 combinations of footprints and room geometry, aligned floors, size-dependent room counts, feature options, agent-tool input contracts, that every diagnostic overlay draws, and the circulation, composition, proportion and facade rules below. `npx tsc --noEmit` checks types.
 
 ## Circulation
 
@@ -29,6 +29,28 @@ access grammar rather than whichever walls happen to touch:
 number of independent routes, the deepest reach in doors, and any room a household is still forced to
 cross. `tryGenerate` composes several candidates and keeps the one that walks best. The studio shows the
 score beside the plan name and the door-by-door walk from the entrance for whichever room is selected.
+
+## Showing the working
+
+A defect in a finished drawing tells you what went wrong and nothing about which stage made it: a room drawn
+as a strip could have come from the programme that asked for it, the composition that gave it its ground, or
+the cut that divided the range. The plan view carries four overlays that each show one stage, chosen from the
+toolbar or by passing `diagnostics` to `PlanDrawing`.
+
+- **Volumes** — every range outlined and labelled with its kind, its proportions, its storeys and how many
+  volumes it stands from the hall, with a line for each wall two of them share. This is the composition
+  stage: a straggling arm shows here as a chain of high numbers.
+- **Circulation** — every doorway drawn as a line between the rooms it joins, every room as a dot carrying
+  the number of doors from the entrance, circulation and destinations coloured apart, and any room a
+  household is forced to cross ringed in red.
+- **Facade bays** — the bay lines each wall was divided into, green where the bay took a light and orange
+  where it was refused, with the corner piers marked. This is where a missing window is either a bay that
+  was never there or a bay something stood in the way of.
+- **Room fit** — every room tinted by how near it stands to the proportion and area the audit will reject it
+  at, and labelled with its dimensions and aspect. This is the room-cutting stage.
+
+The bay lines are not redrawn for the overlay: `bayLines` in `lib/composition.ts` is the one description, used
+by the generator to place its openings and by the drawing to show where it put them.
 
 ## Choosing between compositions
 

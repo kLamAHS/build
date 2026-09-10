@@ -1,7 +1,7 @@
 import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Suite, type Court, type GenerationResult, type BlockBox } from './model.ts';
 import { isCirculation, navigationReport, articulationPoints, HALL_END, IMPROPER_DOORS, ROOM_PRIVACY } from './navigation.ts';
 import { auditArchitecture } from './architectural-audit.ts';
-import { compositionReport } from './composition.ts';
+import { bayLines, compositionReport } from './composition.ts';
 
 export { DEFAULT_SETTINGS, FAMILIES } from './model.ts';
 export function hash(text:string) { let h=2166136261; for(const c of text) h=Math.imul(h^c.charCodeAt(0),16777619); return h>>>0; }
@@ -1369,14 +1369,6 @@ function buildGeometry(p:Plan){
     if(o.type==='window')continue;
     for(let w=-1;w<=o.width;w++)doorCells.add(`${o.x+(o.axis==='z'?w:0)},${o.z+(o.axis==='x'?w:0)}`);
   }
-  /** Bay centres along a wall, with a pier at each corner. Regular by intent: a rhythm is not a monotony. */
-  const bayCentres=(from:number,to:number,pier:number,target:number)=>{
-    const span=to-from-2*pier,out:number[]=[];
-    if(span<4)return out;
-    const count=Math.max(1,Math.round(span/target));
-    for(let i=0;i<count;i++)out.push(from+pier+Math.round(span*(i+.5)/count));
-    return out;
-  };
   /** What each kind of room asks of its wall: how wide a light, how tall, and how high off the floor. */
   const LIGHT:Partial<Record<RoomKind,{width:number;height:number;sill:number}>>={
     hall:{width:2,height:4,sill:2},sacred:{width:2,height:4,sill:2},gallery:{width:2,height:2,sill:2},
@@ -1393,10 +1385,7 @@ function buildGeometry(p:Plan){
   for(const c of p.components){
     if(c.kind==='court')continue;
     const levels=[...new Set(p.rooms.filter(r=>r.componentId===c.id&&r.floorY>=0).map(r=>r.floorY))].sort((m,n)=>m-n);
-    // A castle's piers are heavier, and a chamfered tower has no straight wall within its cut corners.
-    const chamfer=c.kind==='tower'?Math.min(4,Math.floor(c.bounds.w/5)):0;
-    const pier=Math.max(p.settings.kind==='castle'?3:2,chamfer+1),target=c.kind==='tower'?7:6;
-    const b=c.bounds;
+    const lines=bayLines(c,p.settings.kind==='castle'),pier=lines.pier;
     /** Cut one light into this wall at this point, if everything behind and beside it allows one. */
     const place=(side:'n'|'s'|'e'|'w',at:number,y:number,narrow=false)=>{
       const across=side==='n'||side==='s',axis=across?'z':'x';
@@ -1434,8 +1423,7 @@ function buildGeometry(p:Plan){
       return true;
     };
     for(const side of ['n','s','e','w'] as const){
-      const across=side==='n'||side==='s';
-      for(const at of bayCentres(across?b.x:b.z,across?b.x+b.w:b.z+b.d,pier,target))for(const y of levels)place(side,at,y);
+      for(const at of (side==='n'||side==='s'?lines.x:lines.z))for(const y of levels)place(side,at,y);
     }
     // Where the bay rhythm and the rooms behind it disagree, they are repaired together: a room the rhythm
     // misses, but which has a wall of its own to the outside, takes its light on its own centre line.
@@ -1450,7 +1438,7 @@ function buildGeometry(p:Plan){
           const lo=across?rb.x:rb.z,hi=across?rb.x+rb.w:rb.z+rb.d,mid=Math.floor((lo+hi)/2);
           // Off the rhythm but still on the wall's own grid, so a repaired light stands over the storeys
           // below it rather than wherever this floor's rooms happen to divide.
-          const from=across?b.x:b.z,to=across?b.x+b.w:b.z+b.d,grid:number[]=[];
+          const from=across?c.bounds.x:c.bounds.z,to=across?c.bounds.x+c.bounds.w:c.bounds.z+c.bounds.d,grid:number[]=[];
           for(let at=from+pier;at<=to-pier;at+=3)if(at>lo&&at<hi)grid.push(at);
           grid.sort((m,n)=>Math.abs(m-mid)-Math.abs(n-mid)||m-n);
           const spots=[...grid,mid];
