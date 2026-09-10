@@ -124,6 +124,23 @@ so these are real geometry rather than a drawing convention. Two rules bound the
 straight four-block run of wall to receive its door, and its floor never pinches below the two walkable
 blocks a household needs.
 
+## Wall mass
+
+A wall one block thick whatever it carries reads as a line rather than as masonry, and the drawing has to
+fake the difference with a heavier stroke. An outside wall now has its real thickness — three blocks on a
+castle, two otherwise, one less again where an upper storey is timber-framed — and an internal partition
+stays one, so the structural hierarchy is in the geometry rather than in the linework.
+
+The thickness is taken **outward**. A room keeps the floor it was cut with, so nothing downstream of the
+composition moves: routes, door approaches, furniture and the audit all still see the plan they were given.
+A wall two ranges share is not thickened at all, which keeps it one wall between them rather than two; nor is
+the wall a range presents to a yard, since that is a face the yard is entered through. A chamfered tower has
+no straight face to take the mass and keeps the shell it was cut with.
+
+Every opening is then cut through the whole thickness, so a door is a passage and a window a reveal rather
+than a hole in the inner face with masonry still standing behind it. The audit checks that: a doorway walled
+up even one block beyond its face is a rejected candidate, not a drawing to be trusted.
+
 ## Facades
 
 A window used to be stamped every seven blocks from each room's own corner, the same two-by-two light for a

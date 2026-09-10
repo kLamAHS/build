@@ -1226,9 +1226,14 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       p.courts.push({id:'outer-court',name:'Outer ward',bounds:{x:outerX,z:bottom,w:width,d:outerBottom-bottom},gate:{x:p.entry.x,z:outerBottom},wallHeight:6,thickness,gatehouse:{x:p.entry.x-7,z:outerBottom-4,w:15,d:thickness+8},yards:[{name:'Muster yard',kind:'muster',bounds:{x:outerX+5,z:bottom+6,w:Math.max(12,width-10),d:Math.max(10,outerBottom-bottom-14)}}]});
       p.courts[1].gate.z=p.courts[1].bounds.z+p.courts[1].bounds.d;
     }
-    const outward=entranceOpening.outward!,entryStart={x:entranceOpening.x+(outward.x>0?1:outward.x<0?-2:0),z:entranceOpening.z+(outward.z>0?1:outward.z<0?-2:0)};
+    // The path starts clear of the wall the door is cut through, not inside its thickness.
+    const mass=s.kind==='castle'?3:2;
+    const outward=entranceOpening.outward!;
+    const entryStart={x:entranceOpening.x+(outward.x>0?mass:outward.x<0?-mass-1:0),z:entranceOpening.z+(outward.z>0?mass:outward.z<0?-mass-1:0)};
     // A yard is ground, not a building: the path from the gate may cross one.
-    const route=findOutdoorRoute(entryStart,{x:court.gate.x-1,z:court.gate.z-2},court.bounds,components.filter(c=>c.kind!=='court').map(c=>c.bounds));
+    // A range's outside walls stand two or three blocks proud of its floor, so the path keeps that clear.
+    const route=findOutdoorRoute(entryStart,{x:court.gate.x-1,z:court.gate.z-2},court.bounds,
+      components.filter(c=>c.kind!=='court').map(c=>({x:c.bounds.x-mass+1,z:c.bounds.z-mass+1,w:c.bounds.w+2*(mass-1),d:c.bounds.d+2*(mass-1)})));
     if(route)p.routes.push({id:'entry-route',name:'Gate to screens passage',points:route,width:2});
     if(p.courts[1])p.routes.push({id:'ward-route',name:'Inner to outer gate',points:[{x:p.entry.x-1,z:bottom-1},{x:p.entry.x-1,z:p.courts[1].gate.z+2}],width:2});
   }
@@ -1315,6 +1320,43 @@ function buildGeometry(p:Plan){
         outline(rectPolygon(r),y,1,2,'wall',c.id);
         for(let x=r.x;x<=r.x+r.w;x+=5){box({x,z:r.z,w:1,d:1},y,6,2,'wall',c.id);box({x,z:r.z+r.d,w:1,d:1},y,6,2,'wall',c.id);}
         for(let z=r.z;z<=r.z+r.d;z+=5){box({x:r.x,z,w:1,d:1},y,6,2,'wall',c.id);box({x:r.x+r.w,z,w:1,d:1},y,6,2,'wall',c.id);}
+      }
+    }
+  }
+  // ---- Wall mass. A wall that is one block thick whatever it carries reads as a line, not as masonry, and
+  // the drawing has to fake the difference with a heavier stroke. An outside wall is given its real thickness
+  // here — three blocks for a castle, two otherwise — and it is taken outward, so a room keeps the floor it
+  // was cut with and a wall two ranges share stays one wall between them rather than becoming two.
+  const shell=p.settings.kind==='castle'?3:2;
+  /** The bands of wall a range actually carries: one tall shell for a hall or tower, one per storey elsewhere. */
+  const wallBands=(c:BuildingComponent):[Rect,number,number][]=>{
+    if(c.kind==='hall'||c.kind==='tower')return [[c.bounds,c.baseY,c.topY-c.baseY]];
+    const out:[Rect,number,number][]=[];
+    for(let y=c.baseY;y<c.topY;y+=6)out.push([componentFootprint(c,y,p.family),y,6]);
+    return out;
+  };
+  /** Whether this cell is open ground: not inside any range, and not inside a yard a range is entered from. */
+  const openGround=(x:number,z:number)=>!p.components.some(o=>x>=o.bounds.x&&x<o.bounds.x+o.bounds.w&&z>=o.bounds.z&&z<o.bounds.z+o.bounds.d);
+  const thickened=new Set<string>();
+  for(const c of p.components){
+    // A chamfered tower has no straight face to thicken outward; its shell keeps the polygon it was cut with.
+    if(c.kind==='court'||c.polygon.length>4)continue;
+    for(const [f,y,h] of wallBands(c)){
+      const timber=c.kind!=='hall'&&c.kind!=='tower'&&y>=6&&p.settings.kind!=='castle';
+      // An upper storey in timber is a lighter frame than the masonry below it.
+      const depth=timber?shell-1:shell;
+      if(depth<2)continue;
+      for(const [side,along,from,to] of [
+        ['n',f.z,f.x,f.x+f.w],['s',f.z+f.d,f.x,f.x+f.w],
+        ['w',f.x,f.z,f.z+f.d],['e',f.x+f.w,f.z,f.z+f.d],
+      ] as const){
+        const across=side==='n'||side==='s',outward=side==='n'||side==='w'?-1:1;
+        for(let at=from;at<=to;at++)for(let step=1;step<depth;step++){
+          const x=across?at:along+outward*step,z=across?along+outward*step:at;
+          if(!openGround(x,z))continue;
+          box({x,z,w:1,d:1},y,h,timber?5:1,'wall',c.id);
+          thickened.add(`${x},${z}`);
+        }
       }
     }
   }
@@ -1417,7 +1459,19 @@ function buildGeometry(p:Plan){
       }
     }
   }
-  for(const o of p.openings){const r={x:o.x,z:o.z,w:o.axis==='x'?1:o.width,d:o.axis==='z'?1:o.width};box(r,o.y,o.height,o.type==='window'?4:0,o.type==='window'?'glass':'air',p.rooms.find(r=>r.id===o.roomIds[0])!.componentId);}
+  // An opening is cut through the whole thickness of its wall: a door becomes a passage and a window a
+  // reveal, rather than a hole in the inner face with masonry still standing behind it.
+  const jamb=(o:Opening,step:number)=>Array.from({length:o.width},(_,w)=>o.axis==='x'?{x:o.x+step,z:o.z+w}:{x:o.x+w,z:o.z+step});
+  for(const o of p.openings){
+    const material=o.type==='window'?4:0,kind=o.type==='window'?'glass':'air' as const;
+    const id=p.rooms.find(r=>r.id===o.roomIds[0])!.componentId;
+    box({x:o.x,z:o.z,w:o.axis==='x'?1:o.width,d:o.axis==='z'?1:o.width},o.y,o.height,material,kind,id);
+    for(const dir of [1,-1])for(let step=dir;Math.abs(step)<shell;step+=dir){
+      const cells=jamb(o,step);
+      if(!cells.every(c=>thickened.has(`${c.x},${c.z}`)))break;
+      for(const c of cells)box({x:c.x,z:c.z,w:1,d:1},o.y,o.height,material,kind,id);
+    }
+  }
   for(const st of p.stairs){
     const b=st.bounds;
     box({x:b.x+3,z:b.z+3,w:2,d:6},st.toY,1,0,'air',st.componentId);
@@ -1543,24 +1597,31 @@ export const candidateCount=(settings:Settings)=>settings.size>320?3:5;
  */
 export function tryGenerate(settings:Settings):GenerationResult {
   let reason='The composition could not be connected.';
-  const budget=candidateCount(settings),cap=8,candidates:Plan[]=[];
+  const budget=candidateCount(settings),cap=8,candidates:Plan[]=[],audited=new Map<Plan,string[]>();
+  // Rank on what is cheap to know, and pay for the built check on the best of them in turn. Voxelising
+  // every candidate to audit it costs more than composing them all, and tells us nothing about the losers.
+  const best=()=>{
+    for(const plan of [...candidates].sort((a,b)=>rank(b)-rank(a))){
+      let issues=audited.get(plan);
+      if(!issues){issues=auditArchitecture(plan);audited.set(plan,issues);}
+      if(!issues.length)return plan;
+      reason=issues.join(' ');
+    }
+    return undefined;
+  };
   for(let attempt=0;attempt<cap;attempt++){
     let plan:Plan;
     try{plan=generateCandidate(settings,attempt);}catch(error){return {ok:false,error:error instanceof Error?error.message:'Invalid settings.'};}
     if(!plan.validation.valid){reason=plan.validation.issues.join(' ');continue;}
     candidates.push(plan);
-    // The ordinary budget is enough once something walks without a forced crossing. A seed that has not
-    // produced one yet is worth more compositions than a seed that has; that is where the effort belongs.
-    if(attempt+1>=budget&&candidates.some(p=>!p.navigation.transits.length))break;
+    if(attempt+1<budget)continue;
+    // The ordinary budget is enough once something both builds and walks without a forced crossing. A seed
+    // that has not produced one yet is worth more compositions than a seed that has.
+    const chosen=best();
+    if(chosen&&!chosen.navigation.transits.length)return {ok:true,plan:chosen};
   }
-  // Rank on what is cheap to know, and pay for the built check on the best of them in turn. Voxelising
-  // every candidate to audit it costs more than composing them all, and tells us nothing about the losers.
-  candidates.sort((a,b)=>rank(b)-rank(a));
-  for(const plan of candidates){
-    const issues=auditArchitecture(plan);
-    if(!issues.length)return {ok:true,plan};
-    reason=issues.join(' ');
-  }
+  const chosen=best();
+  if(chosen)return {ok:true,plan:chosen};
   return {ok:false,error:`Could not make a buildable composition: ${reason} Try a different seed or a larger footprint. Your previous build is retained.`};
 }
 export function generatePlan(settings:Settings):Plan {const result=tryGenerate(settings);if(!result.ok)throw new Error(result.error);return result.plan;}

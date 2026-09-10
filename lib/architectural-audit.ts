@@ -4,7 +4,18 @@ import { voxelize, type SparseBlocks } from './voxels.ts';
 /** Validate the constructed cells, not just the adjacency labels. */
 export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):string[]{
   const issues:string[]=[];
-  for(const o of plan.openings.filter(o=>o.type!=='window'))for(let w=0;w<o.width;w++)for(let h=0;h<o.height;h++)if(grid.material(o.x+(o.axis==='z'?w:0),o.y+h,o.z+(o.axis==='x'?w:0)))issues.push(`The ${o.type} at X ${o.x}, Z ${o.z} is obstructed.`);
+  // A doorway has to be clear through the whole thickness of its wall, not only at the face it was cut in.
+  // An outside wall stands two or three blocks thick, and a reveal cut through part of it is still a wall.
+  for(const o of plan.openings.filter(o=>o.type!=='window'))for(let w=0;w<o.width;w++)for(let h=0;h<o.height;h++){
+    const x=o.x+(o.axis==='z'?w:0),z=o.z+(o.axis==='x'?w:0);
+    if(grid.material(x,o.y+h,z)){issues.push(`The ${o.type} at X ${o.x}, Z ${o.z} is obstructed.`);continue;}
+    for(const dir of [1,-1])for(let step=1;step<=3;step++){
+      const px=o.axis==='x'?x+dir*step:x,pz=o.axis==='z'?z+dir*step:z;
+      if(!grid.material(px,o.y+h,pz))break;
+      issues.push(`The ${o.type} at X ${o.x}, Z ${o.z} is walled up ${step} block${step===1?'':'s'} beyond its face.`);
+      break;
+    }
+  }
   for(const st of plan.stairs)for(let j=0;j<6;j++)for(let w=0;w<2;w++){
     const x=st.bounds.x+3+w,z=st.bounds.z+3+j,y=st.fromY+j+1;
     if(!grid.material(x,y,z))issues.push('A stair tread is missing.');
