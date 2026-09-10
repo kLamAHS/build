@@ -1,4 +1,4 @@
-import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Reservation, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Motif, type MotifPort, type Suite, type Court, type GenerationResult, type BlockBox } from './model.ts';
+import { FAMILIES, FITTINGS, rectPolygon, intersects, insidePolygon, componentFootprint, type Reservation, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Motif, type MotifPort, type Suite, type Court, type GenerationResult, type BlockBox } from './model.ts';
 import { isCirculation, navigationReport, articulationPoints, HALL_END, IMPROPER_DOORS, ROOM_PRIVACY } from './navigation.ts';
 import { auditArchitecture } from './architectural-audit.ts';
 import { bayLines, compositionReport } from './composition.ts';
@@ -1263,7 +1263,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     for(const st of p.stairs.filter(st=>st.roomIds.includes(r.id)))ports.push(st.landings[r.floorY===st.fromY?0:1]);
     const routesSurvive=(extra:Rect)=>{
       if(ports.length<2)return true;
-      const rb=r.bounds,blocked=[...r.furniture,extra];
+      const rb=r.bounds,blocked=[...r.furniture.filter(f=>f.type!=='dais'),extra];
       const walkable=(px:number,pz:number)=>{
         if(px<=rb.x||pz<=rb.z||px+1>=rb.x+rb.w||pz+1>=rb.z+rb.d)return false;
         for(let dx=0;dx<2;dx++)for(let dz=0;dz<2;dz++){
@@ -1289,7 +1289,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       if(o.axis==='x')return {x:inward?o.x:o.x-3,z:o.z-1,w:4,d:o.width+2};
       return {x:o.x-1,z:inward?o.z:o.z-3,w:o.width+2,d:4};
     });
-    const addFurniture=(type:Room['furniture'][number]['type'],x:number,z:number,w:number,d:number,h=1)=>{
+    const addFurniture=(type:Room['furniture'][number]['type'],x:number,z:number,w:number,d:number,h=1,ignoreApproach=false)=>{
       if(w<=0||d<=0)return;
       const b=r.bounds;
       const fits=(at:Point)=>{
@@ -1297,21 +1297,49 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
         if(at.x<=b.x||at.z<=b.z||at.x+w>=b.x+b.w||at.z+d>=b.z+b.d)return false;
         for(const [cx,cz] of [[at.x+.5,at.z+.5],[at.x+w-.5,at.z+.5],[at.x+.5,at.z+d-.5],[at.x+w-.5,at.z+d-.5]])
           if(!insidePolygon(cx,cz,r.polygon))return false;
-        return !r.furniture.some(f=>intersects(f,box))&&!approaches.some(a=>intersects(a,box));
+        // A dais is a raised floor. Things stand on it and households walk over it, so it neither excludes
+        // what stands on it the way a table would, nor blocks the approach to a door the way a chest would.
+        if(type==='dais'||ignoreApproach)return !r.furniture.some(f=>f.type!=='dais'&&intersects(f,box));
+        return !r.furniture.some(f=>f.type!=='dais'&&intersects(f,box))&&!approaches.some(a=>intersects(a,box));
       };
       const tried:Point[]=[];
       if(fits({x,z}))tried.push({x,z});
       if(!generous)for(let px=b.x+1;px+w<b.x+b.w;px++)for(let pz=b.z+1;pz+d<b.z+b.d;pz++)if(fits({x:px,z:pz}))tried.push({x:px,z:pz});
       tried.sort((m,n)=>(Math.abs(m.x-x)+Math.abs(m.z-z))-(Math.abs(n.x-x)+Math.abs(n.z-z))||m.x-n.x||m.z-n.z);
       for(const at of tried.slice(0,8)){
-        if(!routesSurvive({...at,w,d}))continue;
+        // A dais never closes a route, so it is never tested against one: it is the floor, one step up.
+        if(type!=='dais'&&!routesSurvive({...at,w,d}))continue;
         r.furniture.push({type,...at,w,d,y:r.floorY+1,h,material:9});break;
       }
     };
+    /** A row of shelves along a wall, each one a shelf and a gap to reach between them. */
+    const shelfRun=(x:number,z:number,run:number)=>{
+      const wide=FITTINGS.shelf.long;
+      for(let at=0;at+wide<=run;at+=wide+2)addFurniture('shelf',x+at,z,wide,1,2);
+      if(run<wide&&run>=2)addFurniture('shelf',x,z,run,1,2);
+    };
     if(r.kind==='hall'){
-      const mid=b.x+Math.floor(b.w/2),high=b.z+2,length=Math.max(6,b.d-14);
-      addFurniture('dais',b.x+3,high,Math.max(6,b.w-6),3);
-      addFurniture('table',mid-Math.floor(Math.max(4,b.w-12)/2),high+1,Math.max(4,b.w-12),1);
+      const mid=b.x+Math.floor(b.w/2),high=b.z+2;
+      // The corners of the high end are cut back, and a platform the width of the hall puts its own corners
+      // exactly where the cant took the floor away. It is narrowed until it fits rather than dropped: a hall
+      // with no dais has no high end, and a hall with no high end is a long room with tables in it.
+      for(let wide=Math.max(6,b.w-6);wide>=6;wide-=2){
+        addFurniture('dais',b.x+Math.floor((b.w-wide)/2),high,wide,3);
+        if(r.furniture.some(f=>f.type==='dais'))break;
+      }
+      // The high table is a table: one board of the size a board is, standing on the dais. It goes on the
+      // centre line where the centre line is free and slides along the dais where it is not, because a hall
+      // whose high end has no table at it has no high end.
+      const top=Math.min(FITTINGS.table.long,Math.max(4,b.w-8));
+      const platform=r.furniture.find(f=>f.type==='dais');
+      const spots=[mid-Math.floor(top/2)];
+      if(platform)for(let x=platform.x+1;x+top<=platform.x+platform.w-1;x++)spots.push(x);
+      spots.sort((m,n)=>Math.abs(m+top/2-mid)-Math.abs(n+top/2-mid)||m-n);
+      const seated=()=>r.furniture.some(f=>f.type==='table');
+      for(const at of spots){addFurniture('table',at,high+1,top,1);if(seated())break;}
+      // Where every spot on the dais falls in the swing of a door, the board still goes on the dais: the
+      // route test is what actually protects the way through, and that one still has to pass.
+      if(!seated())for(const at of spots){addFurniture('table',at,high+1,top,1,1,true);if(seated())break;}
       // The hall's hearth strategy, and the older of the two arrangements is not the poorer one. An open
       // hearth stands in the middle of the floor and vents through a louver in the roof, which is what a
       // hall retained from an earlier build still has; a later hall takes a fireplace against its flank
@@ -1322,9 +1350,17 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       else addFurniture('hearth',b.x+1,high+6,2,Math.min(5,Math.max(2,b.d-high-10)),2);
       // A flank with no room for a fireplace is a hall with an open hearth, not a hall with no fire.
       if(!r.furniture.some(f=>f.type==='hearth'))addFurniture('hearth',mid-1,high+6,2,2,1);
-      const bench=(x:number)=>{addFurniture('table',x,high+9,2,length);addFurniture('bench',x-1,high+9,1,length);addFurniture('bench',x+2,high+9,1,length);};
-      bench(b.x+4);
-      if(b.w>=16)bench(b.x+b.w-6);
+      // The household's dining is a repeated trestle — a board, a bench either side, and room to get round
+      // the ends of it — laid down the hall as many times as the hall is long. A longer hall seats more
+      // boards; it does not seat one longer board, which is a shelf with people at it.
+      const BOARD=FITTINGS.table.long,GAP=3,from=high+9,run=b.z+b.d-2-from;
+      const boards=Math.max(1,Math.floor((run+GAP)/(BOARD+GAP)));
+      const aisle=(x:number)=>{for(let i=0;i<boards;i++){
+        const z=from+i*(BOARD+GAP);
+        addFurniture('table',x,z,2,BOARD);addFurniture('bench',x-1,z,1,BOARD);addFurniture('bench',x+2,z,1,BOARD);
+      }};
+      aisle(b.x+4);
+      if(b.w>=16)aisle(b.x+b.w-6);
     }
     else if(r.kind==='bedroom'){addFurniture('bed',b.x+2,b.z+2,Math.min(3,b.w-3),Math.min(4,b.d-3));addFurniture('shelf',b.x+b.w-2,b.z+2,1,Math.min(3,b.d-3),2);}
     else if(r.kind==='service'){
@@ -1338,12 +1374,14 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
         if(b.d>9)addFurniture('hearth',b.x+2,b.z+b.d-3,3,1,2);
       }
     }
-    else if(r.kind==='study'){addFurniture('desk',b.x+2,b.z+2,3,2);addFurniture('shelf',b.x+2,b.z+b.d-2,Math.max(2,b.w-4),1,2);}
-    else if(r.kind==='storage'){addFurniture('shelf',b.x+2,b.z+2,Math.max(2,b.w-4),1,2);if(b.d>8)addFurniture('shelf',b.x+2,b.z+b.d-2,Math.max(2,b.w-4),1,2);}
+    // A shelf is a shelf: a wall gets a row of them with a gap to reach between, not one shelf the length
+    // of the wall. The same rule as the boards, for the same reason.
+    else if(r.kind==='study'){addFurniture('desk',b.x+2,b.z+2,3,2);shelfRun(b.x+2,b.z+b.d-2,b.w-4);}
+    else if(r.kind==='storage'){shelfRun(b.x+2,b.z+2,b.w-4);if(b.d>8)shelfRun(b.x+2,b.z+b.d-2,b.w-4);}
     else if(r.kind==='court'){
       addFurniture('well',b.x+Math.floor(b.w/2)-1,b.z+Math.floor(b.d*.62),3,3,2);
     }
-    else if(r.kind==='sacred'){addFurniture('altar',b.x+5,b.z+3,Math.max(3,b.w-10),2);for(let z=b.z+8;z<b.z+b.d-3;z+=3){addFurniture('bench',b.x+2,z,4,1);addFurniture('bench',b.x+b.w-6,z,4,1);}}
+    else if(r.kind==='sacred'){addFurniture('altar',b.x+Math.floor((b.w-Math.min(FITTINGS.altar.long,Math.max(3,b.w-10)))/2),b.z+3,Math.min(FITTINGS.altar.long,Math.max(3,b.w-10)),2);for(let z=b.z+8;z<b.z+b.d-3;z+=3){addFurniture('bench',b.x+2,z,4,1);addFurniture('bench',b.x+b.w-6,z,4,1);}}
   }
   for(const y of [...new Set(p.rooms.map(r=>r.floorY))].sort((a,b)=>a-b)){
     // A floor's voids are not worked out again here: they are the reservations that reach this level, so a
@@ -1873,7 +1911,9 @@ function buildGeometry(p:Plan){
       box({x:b.x+3,z:b.z+3+j,w:2,d:1},st.fromY+j+2,3,0,'air',st.componentId);
     }
   }
-  for(const r of p.rooms)for(const f of r.furniture)box(f,f.y,f.h,f.material,'furniture',r.componentId);
+  // A dais is the floor of the high end, one step up in the reading and level with it in the walking: it is
+  // laid in the floor course rather than on top of it, so nothing has to climb it to reach the private door.
+  for(const r of p.rooms)for(const f of r.furniture)box(f,f.type==='dais'?f.y-1:f.y,f.h,f.material,'furniture',r.componentId);
   // A hall's fireplace gets its flue before a service range's does: the stack over the household's own fire
   // is the one that reads on the elevation, and the budget of stacks is not large.
   const stackable=p.components.filter(c=>c.kind==='service'||c.kind==='hall'||c.kind==='domestic');

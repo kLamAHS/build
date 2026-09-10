@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { candidateCount, generateCandidate, generatePlan, rank, tryGenerate } from './architecture.ts';
 import { bayLines, compositionReport } from './composition.ts';
-import { componentFootprint, DEFAULT_SETTINGS, FAMILIES, insidePolygon, intersects, type Settings, type Plan, type Rect } from './model.ts';
+import { componentFootprint, DEFAULT_SETTINGS, FAMILIES, FITTINGS, insidePolygon, intersects, type Settings, type Plan, type Rect } from './model.ts';
 import { voxelize, prepareMeshes, SparseBlocks } from './voxels.ts';
 import { auditArchitecture } from './architectural-audit.ts';
 import { batchSettings, regressionBatch } from './regression.ts';
@@ -885,4 +885,43 @@ void test('a range set alongside another leaves a forecourt, not a slot',()=>{
   }
   assert.ok(withOne>=plans*.3,`only ${withOne} of ${plans} estates step a range past another`);
   assert.ok(courts>=withOne,`${courts} forecourts across ${withOne} estates`);
+});
+
+void test('a fitting is a fitting, and a larger room gets more of them',()=>{
+  // The defect this answers: a great hall furnished with one dining table sixty-one blocks long, because the
+  // board was drawn to the room rather than the room filled with boards.
+  const settings=(['house','manor','castle'] as const).flatMap(kind=>FAMILIES[kind].flatMap(f=>
+    [128,256,384].map(size=>({...DEFAULT_SETTINGS,kind,size,floors:3,seed:`FITTING-${size}`,family:f.id}))));
+  const seen=new Set<string>();let items=0;
+  for(const s of settings){
+    const p=generatePlan(s);
+    const tag=`${s.kind}/${s.family}/${s.size}`;
+    for(const r of p.rooms)for(const f of r.furniture){
+      if(f.type==='dais')continue;
+      const fitting=FITTINGS[f.type];
+      assert.ok(fitting,`${tag}: ${f.type} has no dimensions of its own`);
+      items++;seen.add(f.type);
+      assert.ok(Math.max(f.w,f.d)<=fitting.long&&Math.min(f.w,f.d)<=fitting.short,
+        `${tag}: the ${f.type} in ${r.name} is ${f.w} by ${f.d}, past ${fitting.long} by ${fitting.short}`);
+    }
+    assert.deepEqual(auditArchitecture(p),[],`${tag}: the plan does not pass its own audit`);
+  }
+  assert.ok(items>2000,`only ${items} fittings surveyed`);
+  assert.ok(seen.size>=8,`only ${seen.size} kinds of fitting placed`);
+  // A longer hall seats more boards of the same size. It does not seat one longer board.
+  const halls=[160,256,384,512].map(size=>{
+    const p=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'keep-bailey',size,floors:3,seed:'SEATING'});
+    const hall=p.rooms.find(r=>r.kind==='hall')!;
+    const boards=hall.furniture.filter(f=>f.type==='table');
+    return {area:(hall.bounds.w-1)*(hall.bounds.d-1),boards:boards.length,longest:Math.max(...boards.map(f=>Math.max(f.w,f.d)))};
+  });
+  for(const h of halls)assert.ok(h.longest<=FITTINGS.table.long,`a hall of ${h.area} blocks has a board ${h.longest} long`);
+  assert.ok(halls[halls.length-1].boards>halls[0].boards,
+    `the largest hall seats ${halls[halls.length-1].boards} boards against ${halls[0].boards} for the smallest`);
+  // The high table stands on the dais, which is the one fitting that may span its end.
+  const p=generatePlan({...DEFAULT_SETTINGS,kind:'manor',family:'crosswing',size:256,floors:3,seed:'SEATING'});
+  const hall=p.rooms.find(r=>r.kind==='hall')!,dais=hall.furniture.find(f=>f.type==='dais')!;
+  const high=hall.furniture.filter(f=>f.type==='table').sort((a,b)=>a.z-b.z)[0];
+  assert.ok(high.z<=dais.z+dais.d+1,'the high table does not stand at the high end');
+  assert.ok(Math.abs((high.x+high.w/2)-(hall.bounds.x+hall.bounds.w/2))<=2,'the high table is not centred on the hall');
 });

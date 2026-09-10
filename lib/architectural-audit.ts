@@ -1,4 +1,4 @@
-import { componentFootprint, insidePolygon, type Plan, type Rect, type Room, type Point, type RoomKind } from './model.ts';
+import { componentFootprint, FITTINGS, insidePolygon, type Plan, type Rect, type Room, type Point, type RoomKind } from './model.ts';
 import { voxelize, type SparseBlocks } from './voxels.ts';
 
 /** Validate the constructed cells, not just the adjacency labels. */
@@ -159,6 +159,35 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
     if(!room)continue;
     const ways=plan.connections.filter(e=>e.includes(room.id)).length;
     if(ways<2)issues.push(`${c.name} is entered ${ways?'one way':'no way'} only, so it is a dead end rather than a court.`);
+  }
+  // A fitting has real dimensions. A larger room gets more of them, or a different arrangement of them, and
+  // never a bigger one: a bed scaled to its chamber is not a bed, and a board scaled to its hall is a shelf
+  // with people sitting at it.
+  for(const r of plan.rooms)for(const f of r.furniture){
+    if(f.type==='dais')continue;
+    const fitting=FITTINGS[f.type];
+    if(!fitting)continue;
+    if(Math.max(f.w,f.d)>fitting.long||Math.min(f.w,f.d)>fitting.short)
+      issues.push(`The ${f.type} in ${r.name} is ${f.w} by ${f.d}, which is a ${f.type} stretched to its room.`);
+    if(!fitting.clear)continue;
+    // And it has a side you can stand on to use it. A window seat stands in its bay, which is floor the
+    // room's own polygon does not cover, so the projection counts as the room there.
+    const bay=plan.articulation.find(a=>(a.role==='bay'||a.role==='oriel')&&a.roomIds.includes(r.id)
+      &&f.x>=a.bounds.x&&f.x<=a.bounds.x+a.bounds.w&&f.z>=a.bounds.z&&f.z<=a.bounds.z+a.bounds.d);
+    const floorHere=(x:number,z:number)=>insidePolygon(x+.5,z+.5,r.polygon)
+      ||(!!bay&&x>bay.bounds.x&&x<bay.bounds.x+bay.bounds.w&&z>bay.bounds.z&&z<bay.bounds.z+bay.bounds.d);
+    const band=(dx:number,dz:number)=>{
+      const side:Rect=dx?{x:dx>0?f.x+f.w:f.x-fitting.clear,z:f.z,w:fitting.clear,d:f.d}
+        :{x:f.x,z:dz>0?f.z+f.d:f.z-fitting.clear,w:f.w,d:fitting.clear};
+      for(let x=side.x;x<side.x+side.w;x++)for(let z=side.z;z<side.z+side.d;z++){
+        if(!floorHere(x,z))return false;
+        // A dais is the floor of the high end, so standing on it is not standing on the furniture.
+        if(r.furniture.some(o=>o!==f&&o.type!=='dais'&&x>=o.x&&x<o.x+o.w&&z>=o.z&&z<o.z+o.d))return false;
+      }
+      return true;
+    };
+    if(!band(1,0)&&!band(-1,0)&&!band(0,1)&&!band(0,-1))
+      issues.push(`The ${f.type} in ${r.name} has no side clear to use it from.`);
   }
   // A light belongs in a wall with open ground or a yard beyond it, and never in a mass of masonry. The
   // facade pass refuses both when it places one; this is what keeps a later stage from adding one that does.

@@ -246,6 +246,46 @@ composition tried:
   doors out of the private half.
 - A **yard** is a way through, not a dead end with a gate on it.
 
+## A fitting is a fitting
+
+A great hall was furnished with one dining table sixty-one blocks long, and a bench sixty-one blocks long
+either side of it, because the board was drawn to the room instead of the room being filled with boards. A
+solar got a single shelf twenty-one blocks long. §7.3 asks for the opposite: a fitting has real dimensions,
+and a larger room gets more of them or a different arrangement of them, never a bigger one.
+
+`FITTINGS` in `lib/model.ts` is the one place that says how big each thing is and how much room you need
+beside it to use it — the side you stand on to sleep in it, sit at it or work at it. The audit holds every
+piece of furniture to both: a fitting past its dimensions is rejected, and so is one with no clear side.
+
+| | before | after |
+|---|---|---|
+| longest dining table | 61 × 2 | **8 × 2** |
+| longest bench | 61 × 1 | **8 × 1** |
+| longest shelf | 21 × 1 | **4 × 1** |
+| boards in a 3,000-block hall | 2 | **11** |
+
+The hall's dining is now a repeated trestle — a board, a bench either side, and room to get round the ends —
+laid down the hall as many times as the hall is long. A wall gets a row of shelves with a gap to reach
+between them. The altar is an altar rather than a shelf the width of the chapel.
+
+Chasing that turned up something worse. **No hall had ever had a high table, and four in five had no dais.**
+Three separate things were refusing them, each reasonable on its own:
+
+- the dais was tested against its own route-survival check as though it were an obstacle, and a platform
+  across the high end closes every route by definition;
+- the high table was placed on the dais and rejected for intersecting it;
+- the corners of the high end are cut back, and a platform the width of the hall puts its own corners
+  exactly where the cant took the floor away.
+
+A dais is not an obstacle: it is the floor of the high end, one step up in the reading and level with it in
+the walking, so it is laid in the floor course rather than on top of it and nothing has to climb it to reach
+the private door. Things stand on it. It is narrowed until it fits the cant rather than dropped. And the high
+table goes on the centre line where the centre line is free and slides along the dais where it is not.
+
+Every hall now has a dais, and a high table standing on it. §6.1's *typical failure to reject* for the hall
+motif is "a square leftover box with stretched tables and no focal end", and until now that was two out of
+three.
+
 ## Motifs, and what makes a hall a hall
 
 A hall used to be a room labelled `hall`: as wide as it was long, with a dais at one end because that was

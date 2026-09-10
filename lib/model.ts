@@ -6,6 +6,22 @@ export type Rect=Point & {w:number;d:number};
 export type RoomKind='hall'|'bedroom'|'service'|'sacred'|'storage'|'study'|'circulation'|'stairs'|'gallery'|'court';
 export type ComponentKind='hall'|'domestic'|'service'|'tower'|'chapel'|'gatehouse'|'workshop'|'lodging'|'court';
 export type Furniture=Rect & {y:number;h:number;type:'table'|'bench'|'bed'|'shelf'|'hearth'|'desk'|'altar'|'oven'|'well'|'dais'|'seat';material:number};
+/**
+ * What a fitting is, and the room you need beside it to use it. A bed is a bed whatever the size of the
+ * chamber, so an activity is a composition of repeated fittings rather than one fitting stretched to the
+ * wall: a longer hall seats more boards, not one longer board. `clear` is the space on the side that faces
+ * the room — where you stand to sleep in it, sit at it, or work at it.
+ *
+ * The dais is the exception and is not listed: it is a raised floor rather than a thing you could move, and
+ * spanning the high end is what it is for.
+ */
+export type Fitting={long:number;short:number;clear:number};
+export const FITTINGS:Record<Exclude<Furniture['type'],'dais'>,Fitting>={
+  table:{long:8,short:2,clear:1},bench:{long:8,short:1,clear:0},bed:{long:4,short:3,clear:1},
+  shelf:{long:4,short:1,clear:1},hearth:{long:5,short:3,clear:1},desk:{long:3,short:2,clear:1},
+  altar:{long:4,short:2,clear:1},oven:{long:3,short:3,clear:1},well:{long:3,short:3,clear:1},
+  seat:{long:5,short:1,clear:1},
+};
 export type Room={id:string;name:string;kind:RoomKind;componentId:string;suiteId?:string;bounds:Rect;polygon:Point[];holes:Rect[];floorY:number;ceilingY:number;area:number;description:string;furniture:Furniture[]};
 /** Rooms that belong to one occupant and are entered as a set: a chamber with its own wardrobe or garderobe. */
 export type Suite={id:string;name:string;kind:'lodging'|'lord'|'service'|'gate';roomIds:string[];headId:string};
