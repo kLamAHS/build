@@ -191,6 +191,11 @@ function Furniture({room}:{room:Room}){
       {f.type==='well'&&<><circle cx={cx} cy={cz} r={Math.min(f.w,f.d)/2-.3} fill="#c9d3d6"/><circle cx={cx} cy={cz} r={Math.min(f.w,f.d)/2-.9} fill="#8fa6ab"/></>}
       {f.type==='dais'&&<path d={`M${f.x+.5} ${f.z+f.d-.5}h${f.w-1}`} strokeWidth=".2" strokeDasharray=".7 .5"/>}
       {f.type==='seat'&&<path d={f.w>f.d?`M${f.x+.3} ${cz}h${f.w-.6}`:`M${cx} ${f.z+.3}v${f.d-.6}`} strokeWidth=".22"/>}
+      {/* The fixtures a room is built around: a sloped desk to read or enchant at, a still, a forge, crates. */}
+      {f.type==='lectern'&&<><path d={`M${f.x+.35} ${f.z+f.d-.35}L${cx} ${f.z+.35}L${f.x+f.w-.35} ${f.z+f.d-.35}Z`} fill="#e8dcc0"/><path d={`M${cx} ${f.z+.5}v${f.d-1}`} strokeWidth=".16"/></>}
+      {f.type==='still'&&<><circle cx={cx} cy={cz} r={Math.min(f.w,f.d)/2-.35} fill="#d8ccb2"/><path d={`M${cx} ${f.z+.3}v${f.d-.6}M${f.x+.3} ${cz}h${f.w-.6}`} strokeWidth=".16"/></>}
+      {f.type==='forge'&&<><rect x={f.x+.35} y={f.z+.35} width={f.w-.7} height={f.d-.7} fill="#cbb9a2"/><path d={`M${cx-.9} ${cz+.8}q.9-1.6.9-2.4.7.8.9 1.6.5-.6.5-1.4.9 1.1.9 2.2`} fill="none" strokeWidth=".16"/></>}
+      {f.type==='crate'&&<>{Array.from({length:Math.max(1,Math.round(f.w/1.5))},(_,k)=><path key={k} d={`M${f.x+.4+k*1.5} ${f.z+.3}v${f.d-.6}`} strokeWidth=".14"/>)}<path d={`M${f.x+.3} ${cz}h${f.w-.6}`} strokeWidth=".14"/></>}
       {f.type==='altar'&&<path d={`M${cx} ${f.z+.3}v${f.d-.6}M${cx-.8} ${f.z+.9}h1.6`} strokeWidth=".2"/>}
     </g>;
   })}</g>;

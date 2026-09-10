@@ -39,7 +39,8 @@ access grammar rather than whichever walls happen to touch:
 - No room a household would not cross carries another room's only route. The test is whether closing a
   room strands another one, so a bedchamber with a door to its own wardrobe is correctly not a defect.
 - A chapel is sited off the great chamber or the hall, keeps its own antechapel, and is entered only from
-  circulation. Service reaches the hall through the screens passage, not through the hall body.
+  circulation — and the audit now checks the whole *route* to it, not only its own doors, because a forced
+  connection elsewhere in the plan can quietly put a lodging hall on the way to the chapel. Service reaches the hall through the screens passage, not through the hall body.
 - Loop closure adds passage-to-passage doors where the walk is longest, so a plan is never a bare tree
   with exactly one route to everywhere.
 
@@ -245,6 +246,39 @@ composition tried:
 - A **hall** keeps its long axis, its dais at the high end, its screens at the serving end, and its service
   doors out of the private half.
 - A **yard** is a way through, not a dead end with a gate on it.
+
+## Rooms a player needs, and rooms a house should have had
+
+Two gaps, one on each side of the same list.
+
+**A house should have had a library.** A great house has a library, a reading room, a still room, a map room,
+an infirmary; this one had a music room and a nursery and stopped. Four new trade groups fill that in — a
+library group, a still-room group, a physician's group, and more of the tower's clerical rooms — and they are
+ordinary groups, present whatever else is asked for. About half the estates now hold a library or a reading
+room without being asked.
+
+**A build needs somewhere to enchant.** Tick **Rooms a player needs** and the estate also programmes what you
+will have to do in it rather than only what the household did: an enchanting room and its library, a brewing
+room with its ingredient and potion stores, a smelting house with ore and fuel stores and an anvil floor, a
+storage hall with its sorting room and crates, and a trading hall. These are held apart from the trades
+because they answer a different question, and they are only built when the estate is asked for them.
+
+Everything else about them is ordinary, which is the point. They take their place in the programme, get their
+proportions from their kind, are furnished with the fixture they exist for, take their own door onto
+circulation, and are held to the same audit as any other room. They are spliced in behind the first trade
+rather than after the last, so a house with one service range still has somewhere to brew and a small manor
+still has somewhere to enchant. Across a 72-plan sample: an enchanting room in 51, a brewing room in 53, a
+trading hall in 48, a smelting house in 37.
+
+**Four new fixtures** come with them, because a room named for what happens in it should have the thing that
+happens in it: a **lectern** to read or enchant at, a **still** to brew over, a **forge** to smelt and beat
+at, and **crates** that are why a store is a store. Each has real dimensions and a clear side to use it from,
+like every other fitting. A room is named for its function, so the name is what says which fixture it wants —
+the same way the screens passage is known by its name.
+
+While fitting them, furniture stopped being one material. A hearth, an oven, a forge and a still are masonry;
+a well and a dais are stone; everything else is timber. The whole-building Litematica export was building the
+household's fires out of oak log.
 
 ## What a range does when it runs out of programme
 

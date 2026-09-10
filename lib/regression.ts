@@ -40,7 +40,7 @@ export function batchSettings(i:number):Settings {
     size:SIZES[Math.floor(i/13)%SIZES.length],
     floors:FLOORS[Math.floor(i/7)%FLOORS.length],
     organic:ORGANIC[Math.floor(i/11)%ORGANIC.length],
-    courtyard:i%5===0,chapel:i%3!==0,garden:i%2===0,cellar:i%4===0,
+    courtyard:i%5===0,chapel:i%3!==0,garden:i%2===0,cellar:i%4===0,essentials:i%2===1,
     seed:`BATCH-${i}`,
   };
 }

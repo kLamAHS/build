@@ -1,5 +1,6 @@
 import { componentFootprint, FITTINGS, insidePolygon, type Plan, type Rect, type Room, type Point, type RoomKind } from './model.ts';
 import { voxelize, type SparseBlocks } from './voxels.ts';
+import { isCirculation, routeToRoom } from './navigation.ts';
 
 /** Validate the constructed cells, not just the adjacency labels. */
 export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):string[]{
@@ -151,6 +152,15 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
     const over=plan.blocks.find(k=>(k.kind==='roof'||k.kind==='floor')&&k.y>=v.fromY&&k.y<v.toY
       &&k.x<inner.x+inner.w&&k.x+k.w>inner.x&&k.z<inner.z+inner.d&&k.z+k.d>inner.z);
     if(over)issues.push(`${v.name} is open to the sky, and ${over.kind==='roof'?'a roof':'a floor'} is carried across it at Y ${over.y}.`);
+  }
+  // A chapel is entered from circulation, and the way to it does not go through anybody's room. The door
+  // grammar already refuses that door; this refuses the route, which is what a household actually walks and
+  // what a forced connection elsewhere in the plan can quietly undo.
+  const sacred=new Set(plan.components.filter(c=>c.kind==='chapel').map(c=>c.id));
+  for(const r of plan.rooms){
+    if(!sacred.has(r.componentId)||r.floorY<0)continue;
+    const crossed=routeToRoom(plan,r.id).slice(0,-1).filter(o=>!isCirculation(o)&&!sacred.has(o.componentId));
+    if(crossed.length)issues.push(`${r.name} is reached through ${crossed.map(o=>o.name).join(', ')}, which is not a way to a chapel.`);
   }
   // A yard the household can get into only one way is not a court but a gap with a gate on it: an open space
   // belongs to a composition when the buildings round it address it and it is a way through.

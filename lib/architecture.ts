@@ -749,10 +749,13 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       [['Household lodging','bedroom'],['Servants’ hall','service'],['Usher’s room','study'],['Livery store','storage']],
       [['Retainers’ lodging','bedroom'],['Mess room','service'],['Armourer’s room','service'],['Kit store','storage']],
       [['Chaplain’s lodging','bedroom'],['Study','study'],['Almoner’s room','study'],['Book room','storage']],
+      [['Physician’s lodging','bedroom'],['Sick room','bedroom'],['Herb store','storage'],['Bath house','service']],
     ],
     domestic:[
       [['Solar','study'],['Withdrawing room','study'],['Household dining','service'],['Parlour','study'],['Pantry','storage']],
+      [['Library','study'],['Reading room','study'],['Map room','study'],['Book store','storage'],['Muniment room','storage']],
       [['Guest hall','service'],['Steward’s lodging','study'],['Guest parlour','study'],['Household store','storage'],['Linen room','storage']],
+      [['Still room','service'],['Herb room','storage'],['Preserve store','storage'],['Plate room','storage']],
       [['Nursery','bedroom'],['Schoolroom','study'],['Nurse’s chamber','bedroom'],['Toy store','storage']],
       [['Music room','study'],['Long parlour','study'],['Card room','study'],['Instrument store','storage']],
     ],
@@ -761,6 +764,37 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       [['Watch room','service'],['Bowyer’s room','service'],['Signal loft','storage'],['Shot store','storage']],
       [['Treasury','storage'],['Clerk’s room','study'],['Seal room','study'],['Strong room','storage']],
     ],
+  };
+  /**
+   * What a player needs a room for as against what a household did. These are held apart from the trades
+   * above because they answer to a different question — not what this house was for, but what you will have
+   * to do in it — and they are only built when the estate is asked for them. Everything else about them is
+   * ordinary: they take their place in the programme, get their proportions from their kind, are furnished
+   * with the fixture they exist for, and are held to the same audit as any other room.
+   */
+  const ESSENTIAL:Partial<Record<ComponentKind,[string,RoomKind][][]>>={
+    // A library belongs with an enchanting room — the shelves are the point of both — so the group carries
+    // one, and a plan with the essentials on does not lose the library it would otherwise have had.
+    domestic:[[['Enchanting room','study'],['Library','study'],['Bookshelf store','storage'],['Scribe’s room','study'],['Rune store','storage']]],
+    service:[[['Brewing room','service'],['Ingredient store','storage'],['Potion store','storage'],['Water room','service']]],
+    workshop:[
+      [['Smelting house','service'],['Ore store','storage'],['Fuel store','storage'],['Anvil floor','service']],
+      [['Storage hall','storage'],['Sorting room','service'],['Crate store','storage'],['Bale store','storage']],
+    ],
+    lodging:[[['Trading hall','service'],['Merchants’ lodging','bedroom'],['Ledger room','study'],['Tally room','study']]],
+    tower:[[['Enchanting room','study'],['Reading room','study'],['Rune store','storage'],['Ore store','storage']]],
+  };
+  /**
+   * The fixture a room is built around, where it has one. A room is named for what happens in it, so the
+   * name is what says which fixture it wants — the same way the screens passage is known by its name.
+   */
+  const FIXTURES:Record<string,Exclude<Room['furniture'][number]['type'],'dais'>>={
+    'Enchanting room':'lectern','Library':'lectern','Reading room':'lectern','Map room':'lectern',
+    'Scribe’s room':'lectern','Scriptorium':'lectern','Book room':'lectern','Muniment room':'lectern',
+    'Brewing room':'still','Still room':'still','Potion store':'still','Water room':'still',
+    'Smelting house':'forge','Anvil floor':'forge','Smithy':'forge','Farrier’s shop':'forge',
+    'Storage hall':'crate','Crate store':'crate','Bale store':'crate','Ore store':'crate',
+    'Fuel store':'crate','Sorting room':'crate','Trading hall':'crate','Goods store':'crate',
   };
   /**
    * What a range holds above its ground floor. An upper storey that is bedchambers whatever the range is
@@ -798,7 +832,10 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   };
   function programFor(c:BuildingComponent,f:number):[string,RoomKind][]{
     if(f<0)return [['Wine cellar','storage'],['Root store','storage'],['Strong room','storage'],['Buttery store','storage'],['Ice store','storage']];
-    const rank=rankInKind.get(c.id)??0,variants=VARIANTS[c.kind];
+    const rank=rankInKind.get(c.id)??0,base=VARIANTS[c.kind],extra=s.essentials?ESSENTIAL[c.kind]:undefined;
+    // The essential groups go in behind the first trade rather than after the last, so that a house with one
+    // service range still has somewhere to brew and a small manor still has somewhere to enchant.
+    const variants=base?extra?[base[0],...extra,...base.slice(1)]:base:undefined;
     if(f===0&&variants)return trades(variants,rank);
     if(c.kind==='tower'&&f>0)return [[f===c.storeys-1?'Tower chamber':'Solar chamber','bedroom'],['Antechamber','study'],['Wardrobe','storage'],['Guest chamber','bedroom'],['Linen room','storage']];
     if(f===c.storeys-1&&f>1)return [['Gabled bedchamber','bedroom'],['Wardrobe & study','study'],['Bedchamber','bedroom'],['Linen room','storage'],['Private study','study']];
@@ -1336,7 +1373,10 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       for(const at of tried.slice(0,8)){
         // A dais never closes a route, so it is never tested against one: it is the floor, one step up.
         if(type!=='dais'&&!routesSurvive({...at,w,d}))continue;
-        r.furniture.push({type,...at,w,d,y:r.floorY+1,h,material:9});break;
+        // What a fitting is made of, so the block export builds a hearth out of brick and a bench out of
+        // timber rather than making the whole household's furniture one material.
+        const made=type==='hearth'||type==='oven'||type==='forge'||type==='still'?8:type==='well'||type==='dais'?1:9;
+        r.furniture.push({type,...at,w,d,y:r.floorY+1,h,material:made});break;
       }
     };
     /** A row of shelves along a wall, each one a shelf and a gap to reach between them. */
@@ -1345,6 +1385,14 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       for(let at=0;at+wide<=run;at+=wide+2)addFurniture('shelf',x+at,z,wide,1,2);
       if(run<wide&&run>=2)addFurniture('shelf',x,z,run,1,2);
     };
+    // The fixture a room exists for goes in before anything else it is furnished with: a room with a forge
+    // in it is a smelting house, and the bench and the stores are what fit round the forge.
+    const fixture=FIXTURES[r.name.replace(/ \d+$/,'')];
+    if(fixture&&r.kind!=='hall'&&r.kind!=='court'){
+      const fit=FITTINGS[fixture],wide=b.w>=b.d;
+      const fw=Math.min(wide?fit.long:fit.short,Math.max(1,b.w-4)),fd=Math.min(wide?fit.short:fit.long,Math.max(1,b.d-4));
+      addFurniture(fixture,b.x+2,b.z+2,fw,fd,fixture==='forge'?2:1);
+    }
     if(r.kind==='hall'){
       const mid=b.x+Math.floor(b.w/2),high=b.z+2;
       // The corners of the high end are cut back, and a platform the width of the hall puts its own corners
