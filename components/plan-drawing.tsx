@@ -81,8 +81,8 @@ function Diagnostics({plan,floor,mode}:{plan:Plan;floor:Floor;mode:Diagnostic}){
             <line key={`${c.id}z${at}${i}`} x1={x-1.4} y1={at} x2={x+1.4} y2={at} stroke={cut.has(`${at}:x`)?'#2f7a52':'#b06a3a'} strokeWidth=".45"/>)),
           <rect key={`${c.id}p`} x={b.x+l.pier} y={b.z+l.pier} width={Math.max(0,b.w-2*l.pier)} height={Math.max(0,b.d-2*l.pier)} fill="none" stroke="#b06a3a" strokeWidth=".18" strokeDasharray="1 1.6" opacity=".55"/>,
         ];})}
-      {plan.articulation.filter(a=>a.baseY<=y+(a.role==='oriel'?6:2)&&a.topY>y).map(a=>{
-        const b=a.bounds,hue=a.role==='niche'?'#7a5ba8':a.role==='chimney'?'#8a5a2b':'#2f7a52';
+      {plan.articulation.filter(a=>a.baseY<=y+(a.role==='oriel'||a.role==='jetty'?6:2)&&a.topY>y).map(a=>{
+        const b=a.bounds,hue=a.role==='niche'?'#7a5ba8':a.role==='chimney'?'#8a5a2b':a.role==='jetty'?'#8b7f63':'#2f7a52';
         return <g key={a.id}>
           <rect x={b.x} y={b.z} width={b.w} height={b.d} fill={`${hue}1f`} stroke={hue} strokeWidth=".3" strokeDasharray={a.baseY===y||a.baseY-2===y?undefined:'1 1'}/>
           {a.role!=='niche'&&<text x={b.x+b.w/2} y={b.z+b.d+2} fontSize="1.3" textAnchor="middle" fontFamily="ui-monospace,monospace" fill={hue} style={{paintOrder:'stroke',stroke:'#f4eedd',strokeWidth:.55}}>{a.role}</text>}
@@ -112,6 +112,13 @@ function Articulation({plan,y,colors}:{plan:Plan;y:number;colors:boolean}){
     const fill=colors&&room?ROOM_COLORS[room.kind]:'#eee4cd';
     const b=a.bounds;
     if(a.role==='niche')return a.baseY-2===y?<rect key={a.id} x={b.x} y={b.z} width={b.w} height={b.d} fill={fill} stroke="#8e8974" strokeWidth=".12"/>:null;
+    // A jettied storey is shown on the floor it oversails, as the line it crosses and the joist ends under it.
+    if(a.role==='jetty')return a.baseY===y+6?<g key={a.id} pointerEvents="none">
+      <rect x={b.x} y={b.z} width={b.w} height={b.d} fill="#8b7f6318" stroke="#8b7f63" strokeWidth=".22" strokeDasharray="1.2 .9"/>
+      {Array.from({length:Math.max(2,Math.floor((a.side==='n'?b.w:b.d)/4))},(_,i)=>{
+        const at=(a.side==='n'?b.x:b.z)+2+i*4;
+        return <path key={i} d={a.side==='n'?`M${at} ${b.z}v${b.d}`:`M${b.x} ${at}h${b.w}`} stroke="#8b7f63" strokeWidth=".18"/>;})}
+    </g>:null;
     if(a.role==='oriel'&&a.baseY===y+6)return <g key={a.id} pointerEvents="none">
       <rect x={b.x} y={b.z} width={b.w} height={b.d} fill="none" stroke="#8b7f63" strokeWidth=".25" strokeDasharray="1.2 .9"/>
       {Array.from({length:3},(_,i)=><path key={i} d={a.side==='n'||a.side==='s'?`M${b.x+1.5+i*(b.w-3)/2} ${b.z}v${b.d}`:`M${b.x} ${b.z+1.5+i*(b.d-3)/2}h${b.w}`} stroke="#8b7f63" strokeWidth=".2"/>)}

@@ -1,4 +1,4 @@
-import { insidePolygon, type Plan, type Room, type Point, type RoomKind } from './model.ts';
+import { componentFootprint, insidePolygon, type Plan, type Rect, type Room, type Point, type RoomKind } from './model.ts';
 import { voxelize, type SparseBlocks } from './voxels.ts';
 
 /** Validate the constructed cells, not just the adjacency labels. */
@@ -57,6 +57,13 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
   // the room it was built for is a buttress with windows in it; a niche that goes through its wall is a hole.
   for(const a of plan.articulation){
     if(a.role==='chimney')continue;
+    if(a.role==='jetty'){
+      // A jetty is carried on its joists, and the joists are drawn: without them it is a storey in mid-air.
+      const b=a.bounds;
+      if(!plan.blocks.some(k=>k.kind==='support'&&k.y<a.baseY&&k.y>=a.baseY-2&&k.x<b.x+b.w&&k.x+k.w>b.x&&k.z<b.z+b.d&&k.z+k.d>b.z))
+        issues.push(`The jetty at X ${b.x}, Z ${b.z} oversails with nothing shown to carry it.`);
+      continue;
+    }
     const b=a.bounds,where=`The ${a.role} at X ${b.x}, Z ${b.z}`;
     const out=a.side==='n'?{x:0,z:-1}:a.side==='s'?{x:0,z:1}:a.side==='w'?{x:-1,z:0}:{x:1,z:0};
     if(!plan.rooms.some(r=>a.roomIds.includes(r.id))){issues.push(`${where} is recorded against no room.`);continue;}
@@ -81,6 +88,51 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
     if(!arch)issues.push(`${where} never opens into the room it was built for.`);
     if(a.role==='oriel'&&!plan.blocks.some(k=>k.kind==='support'&&k.y<a.baseY&&k.x<b.x+b.w&&k.x+k.w>b.x&&k.z<b.z+b.d&&k.z+k.d>b.z))
       issues.push(`${where} hangs over open ground with nothing shown to carry it.`);
+  }
+  // ---- Vertical composition. A reservation is a volume the storeys owe each other, so what may stand in one
+  // is named by the reservation rather than decided by whichever floor was divided last.
+  const carried=(a:Rect)=>plan.articulation.some(k=>(k.role==='jetty'||k.role==='oriel')&&k.bounds.x<a.x+a.w&&k.bounds.x+k.bounds.w>a.x&&k.bounds.z<a.z+a.d&&k.bounds.z+k.bounds.d>a.z);
+  for(const v of plan.reservations)for(const r of plan.rooms){
+    if(r.floorY<v.fromY||r.floorY>=v.toY)continue;
+    if(!(v.bounds.x<r.bounds.x+r.bounds.w&&v.bounds.x+v.bounds.w>r.bounds.x&&v.bounds.z<r.bounds.z+r.bounds.d&&v.bounds.z+v.bounds.d>r.bounds.z))continue;
+    const where=`${r.name} (Y ${r.floorY}) stands in ${v.name}`;
+    if(v.kind==='hall'&&r.kind!=='gallery')issues.push(`${where}, which only a gallery may overlook.`);
+    if(v.kind==='stair'&&r.kind!=='stairs'&&r.kind!=='circulation')issues.push(`${where}, which is the well a flight comes up through.`);
+    if(v.kind==='court'&&r.kind!=='court'&&!carried(r.bounds))issues.push(`${where}, which is open to the sky.`);
+  }
+  // Every occupied upper room is carried by something: the storey below it, or a cantilever that says so.
+  for(const r of plan.rooms){
+    if(r.floorY<=0||r.kind==='court')continue;
+    const c=plan.components.find(x=>x.id===r.componentId);
+    const under=c&&componentFootprint(c,r.floorY-6,plan.family);
+    if(under&&r.bounds.x>=under.x&&r.bounds.z>=under.z&&r.bounds.x+r.bounds.w<=under.x+under.w&&r.bounds.z+r.bounds.d<=under.z+under.d)continue;
+    if(carried(r.bounds))continue;
+    issues.push(`${r.name} (${r.componentId}, Y ${r.floorY}) stands over open air with nothing to carry it.`);
+  }
+  // A stair rises one storey, lands at both ends of that rise, and both landings are inside its own shaft.
+  for(const st of plan.stairs){
+    const b=st.bounds,where=`The stair ${st.id}`;
+    if(st.toY-st.fromY!==6)issues.push(`${where} rises ${st.toY-st.fromY} blocks rather than one storey.`);
+    if(st.landings.length!==2)issues.push(`${where} has ${st.landings.length} landings rather than one at each level.`);
+    for(const l of st.landings)if(l.x<b.x||l.z<b.z||l.x+l.w>b.x+b.w||l.z+l.d>b.z+b.d)issues.push(`${where} has a landing outside its own shaft.`);
+    if(!plan.rooms.some(r=>st.roomIds.includes(r.id)&&r.floorY===st.fromY)||!plan.rooms.some(r=>st.roomIds.includes(r.id)&&r.floorY===st.toY))
+      issues.push(`${where} does not join a room at each of the levels it serves.`);
+  }
+  // A door may not open onto a void it was never meant to reach, whatever made the void.
+  for(const o of plan.openings){
+    if(o.type==='window')continue;
+    for(const id of o.roomIds){
+      const r=plan.rooms.find(x=>x.id===id);if(!r)continue;
+      const near=o.axis==='x'?{x:o.x+1,z:o.z}:{x:o.x,z:o.z+1},far=o.axis==='x'?{x:o.x-2,z:o.z}:{x:o.x,z:o.z-2};
+      const step=insidePolygon(near.x+1,near.z+1,r.polygon)?near:far;
+      for(const v of plan.reservations){
+        if(v.kind==='court'||r.floorY<v.fromY||r.floorY>=v.toY)continue;
+        if(plan.rooms.some(o2=>o2.id===r.id&&(o2.kind==='gallery'||o2.kind==='stairs'||o2.kind==='circulation')))continue;
+        for(let dx=0;dx<2;dx++)for(let dz=0;dz<2;dz++)
+          if(step.x+dx>=v.bounds.x&&step.x+dx<v.bounds.x+v.bounds.w&&step.z+dz>=v.bounds.z&&step.z+dz<v.bounds.z+v.bounds.d)
+            issues.push(`The ${o.type} into ${r.name} (Y ${r.floorY}) opens onto ${v.name.toLowerCase()}.`);
+      }
+    }
   }
   return [...new Set(issues)];
 }

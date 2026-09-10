@@ -1,4 +1,4 @@
-import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Suite, type Court, type GenerationResult, type BlockBox } from './model.ts';
+import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Reservation, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Suite, type Court, type GenerationResult, type BlockBox } from './model.ts';
 import { isCirculation, navigationReport, articulationPoints, HALL_END, IMPROPER_DOORS, ROOM_PRIVACY } from './navigation.ts';
 import { auditArchitecture } from './architectural-audit.ts';
 import { bayLines, compositionReport } from './composition.ts';
@@ -304,11 +304,28 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   // what stands is simply the one build there ever was, and it is treated as such.
   if(!components.some(c=>c.phase>0))for(const c of components)c.phase=1;
   // Compact budgets keep the same minimum stair and room sizes; optional ranges are omitted.
-  const p:Plan={schemaVersion:2,generatorVersion:'2.0',name:reference?'Alderhall Manor':`${pick(names)}${pick(['wick','mere','ford','haven'])} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,family,components,rooms:[],floors:[],openings:[],stairs:[],chimneys:[],articulation:[],courts:[],routes:[],blocks:[],walls:[],slabs:[],roofs:[],supports:[],bounds:{x:0,z:0,w:0,d:0},minY:s.cellar?-6:0,maxY:0,width:0,depth:0,totalArea:0,entry:{x:0,z:0},connections:[],suites:[],validation:{valid:true,issues:[]},navigation:{maxDepth:0,meanDepth:0,loops:0,unreachable:[],transits:[],strandedRooms:0,compromises:0,score:0},composition:{volumes:0,reach:0,spread:0,yards:0,hierarchy:0,frontage:0,score:0},signature:''};
+  const p:Plan={schemaVersion:2,generatorVersion:'2.0',name:reference?'Alderhall Manor':`${pick(names)}${pick(['wick','mere','ford','haven'])} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,family,components,rooms:[],floors:[],openings:[],stairs:[],chimneys:[],articulation:[],reservations:[],courts:[],routes:[],blocks:[],walls:[],slabs:[],roofs:[],supports:[],bounds:{x:0,z:0,w:0,d:0},minY:s.cellar?-6:0,maxY:0,width:0,depth:0,totalArea:0,entry:{x:0,z:0},connections:[],suites:[],validation:{valid:true,issues:[]},navigation:{maxDepth:0,meanDepth:0,loops:0,unreachable:[],transits:[],strandedRooms:0,compromises:0,score:0},composition:{volumes:0,reach:0,spread:0,yards:0,hierarchy:0,frontage:0,score:0},signature:''};
   function room(c:BuildingComponent,name:string,kind:RoomKind,bounds:Rect,y:number,ceiling=y+6,shape:RoomShape='rect',shapeSide:'n'|'s'|'e'|'w'='e',notch?:Rect,corners?:DaisCorners){
     const envelope=c.kind==='tower'?c.polygon:rectPolygon(componentFootprint(c,y,family));
     const polygon=shape==='rect'?clipPolygon(envelope,bounds):clipPolygon(shapePolygon(bounds,shape,shapeSide,notch,corners),componentFootprint(c,y,family));
     const r:Room={id:`r${p.rooms.length}`,name,kind,componentId:c.id,bounds,polygon,holes:[],floorY:y,ceilingY:ceiling,area:(bounds.w-1)*(bounds.d-1),description:'',furniture:[]};p.rooms.push(r);return r;
+  }
+  // ---- Stage B. What the storeys owe each other, settled before any floor is divided so that an upper plan
+  // inherits these volumes rather than discovering them. The three conditions are kept apart because they
+  // are not the same thing: a court is open exterior for its whole height; a hall is interior volume with no
+  // floor carried across it; a stair well is the hole one storey leaves in the next. Nothing is built in a
+  // reservation except what it names as its own exception.
+  const reserve=(kind:Reservation['kind'],name:string,c:BuildingComponent,bounds:Rect,polygon:Point[],fromY:number,toY:number,open:Reservation['open'],reason:string)=>{
+    if(toY>fromY)p.reservations.push({id:`v${p.reservations.length}`,kind,name,componentId:c.id,bounds,polygon,fromY,toY,open,reason});
+  };
+  for(const c of components){
+    if(c.kind==='court'){
+      // A yard is open to the sky for as far up as the ranges round it stand, not only at the ground.
+      const round=components.filter(o=>o!==c&&o.kind!=='court'&&intersects({x:c.bounds.x-1,z:c.bounds.z-1,w:c.bounds.w+2,d:c.bounds.d+2},o.bounds));
+      reserve('court',c.name,c,c.bounds,c.polygon,0,Math.max(6,...round.map(o=>o.topY)),'exterior','Open to the sky for the height of the ranges around it');
+    }
+    // A hall carried through two storeys is interior volume, and the storeys above it get no floor across it.
+    else if(c.kind==='hall'&&c.topY>6)reserve('hall',`Open to ${c.name.toLowerCase()} below`,c,c.bounds,c.polygon,6,c.topY,'interior','A hall rising through its storeys keeps its volume; only a gallery may overlook it');
   }
   // Circulation has to reach the walls where ranges meet. Where it does not, the only way to join two wings
   // is a door through somebody's chamber, which is how a kitchen ends up on the route to the chapel.
@@ -957,7 +974,9 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     for(let i=0;i<stairRooms.length-1;i++){
       const a=stairRooms[i],b=stairRooms[i+1];
       p.stairs.push({id:`s${p.stairs.length}`,componentId:c.id,roomIds:[a.id,b.id],bounds:shaft,fromY:a.floorY,toY:b.floorY,width:2,headroom:3,landings:[{x:shaft.x+1,z:shaft.z+1,w:5,d:2},{x:shaft.x+1,z:shaft.z+9,w:5,d:2}]});
+      const well={x:shaft.x+3,z:shaft.z+3,w:2,d:6};
       b.holes.push({x:shaft.x+3,z:shaft.z+3,w:1,d:5});
+      reserve('stair',`Open to the stair below`,c,well,rectPolygon(well),b.floorY,b.floorY+6,'interior',`The well the flight up from ${a.name.toLowerCase()} comes through`);
     }
   }
   // Room adjacency comes from real shared walls. Circulation is connected first;
@@ -1248,13 +1267,12 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     else if(r.kind==='sacred'){addFurniture('altar',b.x+5,b.z+3,Math.max(3,b.w-10),2);for(let z=b.z+8;z<b.z+b.d-3;z+=3){addFurniture('bench',b.x+2,z,4,1);addFurniture('bench',b.x+b.w-6,z,4,1);}}
   }
   for(const y of [...new Set(p.rooms.map(r=>r.floorY))].sort((a,b)=>a-b)){
-    const voids=components.filter(c=>c.kind==='hall'&&y>0&&y<c.topY).map(c=>({id:`void-${c.id}-${y}`,name:'Open to hall below',bounds:c.bounds,polygon:c.polygon,holes:p.rooms.filter(r=>r.componentId===c.id&&r.floorY===y).map(r=>r.bounds),floorY:y,ceilingY:c.topY}));
-    // The floor a stair comes up through is a hole in the storey above it, and a hole is a void: it is
-    // drawn as one and annotated as one rather than left as an unexplained gap in the boards.
-    for(const st of p.stairs.filter(st=>st.toY===y)){
-      const well={x:st.bounds.x+3,z:st.bounds.z+3,w:2,d:6};
-      voids.push({id:`well-${st.id}`,name:'Open to the stair below',bounds:well,polygon:rectPolygon(well),holes:[],floorY:y,ceilingY:y+6});
-    }
+    // A floor's voids are not worked out again here: they are the reservations that reach this level, so a
+    // hole in the boards is always the volume something else was given rather than an unexplained gap.
+    const voids=p.reservations.filter(v=>v.kind!=='court'&&y>=v.fromY&&y<v.toY).map(v=>({
+      id:`${v.id}-${y}`,name:v.name,kind:v.kind,bounds:v.bounds,polygon:v.polygon,floorY:y,ceilingY:v.toY,
+      holes:v.kind==='hall'?p.rooms.filter(r=>r.componentId===v.componentId&&r.floorY===y).map(r=>r.bounds):[],
+    }));
     p.floors.push({index:y/6,name:y<0?'Cellar':y===0?'Ground floor':y===6?'First floor':y===12?'Second floor':`Floor ${y/6+1}`,elevation:y,rooms:p.rooms.filter(r=>r.floorY===y),voids,roofComponents:components.filter(c=>c.topY<=y).map(c=>c.id)});
   }
   if(!small&&!quadrangle&&(s.kind==='castle'||s.courtyard||['courtyard-manor','palace','double-ward'].includes(family))){
@@ -1626,6 +1644,23 @@ function buildGeometry(p:Plan){
     room.furniture.push({...seat,y,h:1,type:'seat',material:9});
     p.articulation.push({id:`a${p.articulation.length}`,role:oriel?'oriel':'bay',componentId:c.id,roomIds:[room.id],
       bounds:rect,side,baseY:y,topY:y+6,reason:`${oriel?'An oriel':'A bay'} lighting and seating the ${room.name.toLowerCase()}`});
+  }
+  // A jettied storey oversails the one below it on its joists. componentFootprint has always known that;
+  // recording it here is what makes an upper room standing over open ground an explained cantilever rather
+  // than a room in mid-air, and gives the storey below a line to draw.
+  for(const c of p.components){
+    const over=componentFootprint(c,6,p.family);
+    if(c.storeys<2||over.x>=c.bounds.x&&over.z>=c.bounds.z)continue;
+    for(const side of ['n','w'] as const){
+      const b=c.bounds,jut=side==='n'?{x:over.x,z:over.z,w:over.w,d:b.z-over.z}:{x:over.x,z:b.z,w:b.x-over.x,d:over.d-(b.z-over.z)};
+      if(jut.w<1||jut.d<1)continue;
+      // The joists are what carry it, so they are built: a course under the oversail and their ends showing
+      // as brackets on the storey below. A jetty with nothing under it is a storey standing in mid-air.
+      box(jut,5,1,2,'support',c.id);
+      for(let x=jut.x;x<jut.x+jut.w;x+=3)for(let z=jut.z;z<jut.z+jut.d;z++)box({x,z,w:1,d:1},4,1,2,'support',c.id);
+      p.articulation.push({id:`a${p.articulation.length}`,role:'jetty',componentId:c.id,roomIds:p.rooms.filter(r=>r.componentId===c.id&&r.floorY===6).map(r=>r.id),
+        bounds:jut,side,baseY:6,topY:c.topY,reason:`The first floor of the ${c.name.toLowerCase()} oversails the storey below on its joists`});
+    }
   }
   // A wall thick enough to give one away takes a niche: a recess for a lamp or an image, cut from the inside
   // face and stopping well short of daylight. Only the rooms that would have been given one, and only a few.

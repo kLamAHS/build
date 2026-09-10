@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { candidateCount, generateCandidate, generatePlan, rank, tryGenerate } from './architecture.ts';
 import { bayLines, compositionReport } from './composition.ts';
-import { DEFAULT_SETTINGS, FAMILIES, insidePolygon, intersects, type Settings, type Plan, type Rect } from './model.ts';
+import { componentFootprint, DEFAULT_SETTINGS, FAMILIES, insidePolygon, intersects, type Settings, type Plan, type Rect } from './model.ts';
 import { voxelize, prepareMeshes, SparseBlocks } from './voxels.ts';
 import { auditArchitecture } from './architectural-audit.ts';
 import { accessGraph, transitViolations, isCirculation, routeToRoom, navigationReport, articulationPoints } from './navigation.ts';
@@ -264,7 +264,9 @@ void test('an upper storey is accommodation of its own, and a stair comes up int
     const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size,floors:4,seed:'ABOVE'});
     for(const st of p.stairs){
       const above=p.floors.find(f=>f.elevation===st.toY);
-      assert.ok(above?.voids.some(v=>v.id===`well-${st.id}`),`${family.id}/${size}: ${st.id} comes up into a floor with no well drawn`);
+      // The well is not worked out again by the drawing: it is the reservation the stair took, reaching this level.
+      assert.ok(above?.voids.some(v=>v.kind==='stair'&&intersects(v.bounds,st.bounds)),`${family.id}/${size}: ${st.id} comes up into a floor with no well drawn`);
+      assert.ok(p.reservations.some(v=>v.kind==='stair'&&v.componentId===st.componentId&&intersects(v.bounds,st.bounds)),`${family.id}/${size}: ${st.id} reserved no well`);
     }
     // A door onto a well is a fall, and the audit rejects it; every plan returned has already passed that.
     assert.deepEqual(auditArchitecture(p),[],`${family.id}/${size}: the plan returned does not pass its own audit`);
@@ -578,6 +580,13 @@ void test('a projection has a reason, and keeps the promise the reason makes',()
       const c=p.components.find(x=>x.id===a.componentId);
       assert.ok(c,`${tag}: ${a.role} belongs to no range`);
       if(a.role==='chimney')continue;
+      if(a.role==='jetty'){
+        // A jetty is an explicit cantilever: a whole storey oversailing, with its joists shown underneath.
+        assert.equal(a.baseY,6,`${tag}: a jetty on floor ${a.baseY/6}`);
+        assert.ok(p.blocks.some(k=>k.kind==='support'&&k.y<a.baseY&&k.y>=a.baseY-2&&k.x<a.bounds.x+a.bounds.w&&k.x+k.w>a.bounds.x&&k.z<a.bounds.z+a.bounds.d&&k.z+k.d>a.bounds.z),
+          `${tag}: the jetty at ${a.bounds.x},${a.bounds.z} oversails on nothing`);
+        continue;
+      }
       if(a.role==='niche'){
         // A niche is the inward case: it sits in the wall of its room and stops short of daylight.
         const room=p.rooms.find(r=>a.roomIds.includes(r.id))!;
@@ -612,7 +621,7 @@ void test('a projection has a reason, and keeps the promise the reason makes',()
     // Two projections may not want the same ground, and none may stand on a range.
     for(let i=0;i<p.articulation.length;i++)for(let j=i+1;j<p.articulation.length;j++){
       const a=p.articulation[i],b=p.articulation[j];
-      if(a.role==='niche'||b.role==='niche')continue;
+      if(a.role==='niche'||b.role==='niche'||a.role==='jetty'||b.role==='jetty')continue;
       assert.ok(!intersects(a.bounds,b.bounds),`${tag}: the ${a.role} and the ${b.role} want the same ground`);
     }
     assert.deepEqual(auditArchitecture(p,grid),[],`${tag}: the audit rejects this plan`);
@@ -623,4 +632,51 @@ void test('a projection has a reason, and keeps the promise the reason makes',()
   assert.ok(carried>0,'no oriel anywhere, so the overhang convention is never exercised');
   // Restraint is the rule: repeated ordinary rooms are what make the exceptions read as exceptions.
   assert.ok(projections/rooms<.05,`${projections} projections for ${rooms} rooms is not restraint`);
+});
+
+void test('the storeys inherit their volumes instead of discovering them',()=>{
+  // The defect this answers: the hall void and the stair well were worked out again by whichever floor was
+  // being drawn, so nothing in the plan said which volumes the storeys owed each other or why.
+  let halls=0,wells=0,yards=0,upper=0,exceptions=0;
+  const settings=(['house','manor','castle'] as const).flatMap(kind=>FAMILIES[kind].flatMap(f=>
+    [128,256,384].map(size=>({...DEFAULT_SETTINGS,kind,size,floors:3,seed:`VOLUME-${size}`,family:f.id}))));
+  for(const s of settings){
+    const p=generatePlan(s);
+    const tag=`${s.kind}/${s.family}/${s.size}`;
+    const hall=p.components.find(c=>c.kind==='hall')!;
+    assert.ok(p.reservations.length,`${tag}: nothing is reserved`);
+    for(const v of p.reservations){
+      assert.ok(v.toY>v.fromY,`${tag}: ${v.name} reserves no height`);
+      assert.ok(v.reason.length>10,`${tag}: ${v.name} carries no reason`);
+      assert.equal(v.open,v.kind==='court'?'exterior':'interior',`${tag}: ${v.kind} is ${v.open}`);
+      assert.ok(p.components.some(c=>c.id===v.componentId),`${tag}: ${v.name} belongs to no range`);
+      if(v.kind==='hall'){halls++;assert.equal(v.componentId,hall.id);assert.equal(v.fromY,6);assert.equal(v.toY,hall.topY);}
+      if(v.kind==='stair')wells++;
+      if(v.kind==='court')yards++;
+      // What stands in a reservation is named by the reservation, not decided by the floor divided last.
+      for(const r of p.rooms.filter(r=>r.floorY>=v.fromY&&r.floorY<v.toY&&intersects(v.bounds,r.bounds))){
+        if(v.kind==='hall'){assert.equal(r.kind,'gallery',`${tag}: ${r.name} stands in ${v.name}`);exceptions++;}
+        if(v.kind==='stair')assert.ok(['stairs','circulation'].includes(r.kind),`${tag}: ${r.name} stands in the stair well`);
+      }
+    }
+    // The drawing does not work a void out for itself: every one is a reservation that reaches that level.
+    for(const floor of p.floors)for(const v of floor.voids)
+      assert.ok(p.reservations.some(res=>res.kind===v.kind&&res.name===v.name&&floor.elevation>=res.fromY&&floor.elevation<res.toY),
+        `${tag}: the void ${v.name} on ${floor.name} answers to no reservation`);
+    // Every occupied upper room is carried: by the storey below it, or by a cantilever that says it is.
+    for(const r of p.rooms){
+      if(r.floorY<=0||r.kind==='court')continue;
+      upper++;
+      const c=p.components.find(x=>x.id===r.componentId)!,under=componentFootprint(c,r.floorY-6,p.family);
+      const inside=r.bounds.x>=under.x&&r.bounds.z>=under.z&&r.bounds.x+r.bounds.w<=under.x+under.w&&r.bounds.z+r.bounds.d<=under.z+under.d;
+      const cantilever=p.articulation.some(a=>(a.role==='jetty'||a.role==='oriel')&&intersects(a.bounds,r.bounds));
+      assert.ok(inside||cantilever,`${tag}: ${r.name} (Y ${r.floorY}) stands over open air`);
+    }
+    assert.deepEqual(auditArchitecture(p),[],`${tag}: the plan does not pass its own audit`);
+  }
+  assert.ok(halls>=settings.length*.9,`only ${halls} of ${settings.length} halls keep their volume`);
+  assert.ok(wells>settings.length,`only ${wells} stair wells reserved across ${settings.length} estates`);
+  assert.ok(yards>0,'no yard is reserved as open exterior anywhere');
+  assert.ok(exceptions>0,'no gallery ever overlooks a hall, so the exception is never exercised');
+  assert.ok(upper>500,`only ${upper} rooms above the ground floor surveyed`);
 });

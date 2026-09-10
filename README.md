@@ -164,6 +164,42 @@ annotation, rather than an unexplained grey gap in the boards. The audit rejects
 onto one — the route test would have caught it as a missing floor, but a household walking off a landing into
 the stair well deserves to be told what it is.
 
+## Vertical composition
+
+The hall void and the stair well used to be worked out again by whichever floor was being drawn, so nothing
+in the plan said which volumes the storeys owed each other, or why.
+
+`Plan.reservations` is settled before any floor is divided, so an upper plan inherits these volumes rather
+than discovering them. The three conditions are kept apart because they are not the same thing:
+
+- a **court** is open exterior for its whole height, which is as far up as the ranges around it stand;
+- a **hall** is interior volume with no floor carried across it, from the first floor to the top of the hall;
+- a **stair** well is the hole one storey leaves in the next, for the flight that comes up through it.
+
+Each reservation names the exception it allows. A gallery may overlook a hall; a chamber may not be dropped
+into one. A stair well takes stairs and circulation and nothing else. A yard takes nothing at all unless a
+cantilever says otherwise. The audit enforces that, and a floor's voids are no longer worked out by the
+drawing — they are the reservations that reach that level, so a hole in the boards is always the volume
+something else was given. Across the 960-setting sweep that comes to a hall void in every estate that has a
+hall of more than one storey, 830 stair wells and 159 reserved yards in a 108-plan slice.
+
+Three further checks come with it. Every occupied upper room must be carried by the storey below it or by a
+cantilever that says so; every stair must rise exactly one storey, land at both ends of that rise, keep both
+landings inside its own shaft, and join a room at each level it serves; and no door may open onto a void it
+was never meant to reach.
+
+The first of those found a real defect. The merchant house's first floor **jetties** — it oversails the
+storey below by a block on two sides — and `componentFootprint` had always known that, but nothing else did:
+the storey stood in mid-air with no joists under it. A jetty is now an articulation like any other, with the
+joist course and the bracket ends built underneath it, drawn on the floor it oversails, and checked by the
+audit that it has something to stand on.
+
+**Level offsets are deliberately not modelled.** A floor is the set of rooms at one elevation, and the whole
+plan — the floor list, the drawing, the stair rise, the export — is keyed on that. Half-sunken undercrofts
+and split levels would need floors to be a range of elevations rather than one, which is a larger change than
+this section is worth; pretending to them by moving rooms between floor groups would be worse than not having
+them.
+
 ## Construction history
 
 Every range of every seat used to be the same masonry, the same rhythm and the same window, because nothing
@@ -263,6 +299,8 @@ role it plays and the reason it is there. Whole projecting volumes — a tower, 
 - **Chimney.** The stack over a fire, which was already built but never recorded. Its reason names the fire.
 - **Niche.** The inward case: a recess for a lamp or an image, cut into a wall thick enough to give one away —
   a castle's, or a retained core's — and stopping well short of daylight.
+- **Jetty.** A whole upper storey oversailing the one below on its joists, which the merchant house has always
+  done and nothing had ever recorded. See *Vertical composition* above.
 
 The role is what the audit checks, so a projection that does not do what it claims is a rejected candidate
 rather than a decoration. A bay must have a floor to stand on, must enclose something, and must open into the
