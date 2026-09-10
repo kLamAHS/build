@@ -1,4 +1,4 @@
-import { FAMILIES, FITTINGS, rectPolygon, intersects, insidePolygon, componentFootprint, type Reservation, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Motif, type MotifPort, type Suite, type Court, type GenerationResult, type BlockBox } from './model.ts';
+import { FAMILIES, FITTINGS, rectPolygon, intersects, insidePolygon, componentFootprint, type Reservation, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Motif, type MotifPort, type Suite, type Court, type GenerationResult, type BlockBox, type Alternative } from './model.ts';
 import { isCirculation, navigationReport, articulationPoints, HALL_END, IMPROPER_DOORS, ROOM_PRIVACY } from './navigation.ts';
 import { auditArchitecture } from './architectural-audit.ts';
 import { bayLines, compositionReport } from './composition.ts';
@@ -2127,12 +2127,21 @@ export const candidateCount=(settings:Settings)=>settings.size>320?3:5;
  * Compose every candidate the seed is worth and keep the best of them, rather than the first that merely
  * stands up. The attempt count is fixed per size so the result stays a pure function of the settings.
  */
-export function tryGenerate(settings:Settings):GenerationResult {
+/**
+ * Compose several estates for a seed and return the one that stands and walks best — along with the others
+ * it considered. §5.4 asks for a diverse set of promising candidates to be preserved rather than only the
+ * most compact footprint, and the alternatives are that set: the same attempt of the same seed always
+ * composes the same estate, so an attempt number is enough to build any of them again.
+ *
+ * Pass `only` to build one attempt and nothing else, which is what choosing an alternative does.
+ */
+export function tryGenerate(settings:Settings,only?:number):GenerationResult {
   let reason='The composition could not be connected.';
   // The cap is only ever paid by a seed that has not yet produced a plan without a forced crossing: an easy
   // seed returns at its budget. Raising it costs the hard seeds time and buys them the one thing this
   // generator exists to give — a household that is never made to walk through somebody's chamber.
   const budget=candidateCount(settings),cap=12,candidates:Plan[]=[],audited=new Map<Plan,string[]>();
+  const attempts=new Map<Plan,number>(),refused:Alternative[]=[];
   // Rank on what is cheap to know, and pay for the built check on the best of them in turn. Voxelising
   // every candidate to audit it costs more than composing them all, and tells us nothing about the losers.
   const best=()=>{
@@ -2144,19 +2153,62 @@ export function tryGenerate(settings:Settings):GenerationResult {
     }
     return undefined;
   };
+  /** What each composition was, and what became of it, for a reader choosing between them. */
+  const roundUp=(chosen?:Plan):Alternative[]=>[
+    ...candidates.map(plan=>{
+      const issues=audited.get(plan);
+      return {
+        attempt:attempts.get(plan)!,rank:Math.round(rank(plan)),
+        navigation:plan.navigation.score,composition:plan.composition.score,
+        volumes:plan.components.length,yards:plan.composition.yards,rooms:plan.rooms.length,
+        state:(plan===chosen?'chosen':!issues?'unexamined':issues.length?'rejected':'sound') as Alternative['state'],
+        issue:issues?.length?issues[0]:undefined,
+      };
+    }),
+    ...refused,
+  ].sort((a,b)=>b.rank-a.rank||a.attempt-b.attempt);
+  const compose=(attempt:number)=>{
+    try{return generateCandidate(settings,attempt);}
+    catch(error){throw error instanceof Error?error:new Error('Invalid settings.');}
+  };
+  if(only!==undefined){
+    let plan:Plan;
+    try{plan=compose(only);}catch(error){return {ok:false,error:(error as Error).message};}
+    const issues=plan.validation.valid?auditArchitecture(plan):plan.validation.issues;
+    if(issues.length)return {ok:false,error:`That composition does not stand up: ${issues[0]} ${relax(settings,issues[0])}`};
+    candidates.push(plan);attempts.set(plan,only);audited.set(plan,[]);
+    return {ok:true,plan,alternatives:roundUp(plan)};
+  }
   for(let attempt=0;attempt<cap;attempt++){
     let plan:Plan;
-    try{plan=generateCandidate(settings,attempt);}catch(error){return {ok:false,error:error instanceof Error?error.message:'Invalid settings.'};}
-    if(!plan.validation.valid){reason=plan.validation.issues.join(' ');continue;}
-    candidates.push(plan);
+    try{plan=compose(attempt);}catch(error){return {ok:false,error:(error as Error).message};}
+    if(!plan.validation.valid){
+      reason=plan.validation.issues.join(' ');
+      refused.push({attempt,rank:0,navigation:0,composition:0,volumes:plan.components.length,yards:0,rooms:plan.rooms.length,state:'rejected',issue:plan.validation.issues[0]});
+      continue;
+    }
+    candidates.push(plan);attempts.set(plan,attempt);
     if(attempt+1<budget)continue;
     // The ordinary budget is enough once something both builds and walks without a forced crossing. A seed
     // that has not produced one yet is worth more compositions than a seed that has.
     const chosen=best();
-    if(chosen&&!chosen.navigation.transits.length)return {ok:true,plan:chosen};
+    if(chosen&&!chosen.navigation.transits.length)return {ok:true,plan:chosen,alternatives:roundUp(chosen)};
   }
   const chosen=best();
-  if(chosen)return {ok:true,plan:chosen};
-  return {ok:false,error:`Could not make a buildable composition: ${reason} Try a different seed or a larger footprint. Your previous build is retained.`};
+  if(chosen)return {ok:true,plan:chosen,alternatives:roundUp(chosen)};
+  return {ok:false,error:`Could not make a buildable composition: ${reason} ${relax(settings,reason)}`};
+}
+/**
+ * What to change, said in terms of the thing that actually went wrong. §17.4 asks that impossible
+ * constraints come back as a specific conflict with proposed relaxations rather than as a broken success,
+ * and "try something else" is not a proposal.
+ */
+function relax(settings:Settings,reason:string){
+  const bigger=settings.size<512?`Raise the footprint budget above ${settings.size} blocks`:'Reduce what the estate has to house';
+  if(/strip|swallowed|no long axis/.test(reason))return `${bigger}, or reduce the storeys from ${settings.floors} so each range has less to divide. Your previous build is retained.`;
+  if(/route|walled up|obstructed|stranded/.test(reason))return `Try another seed, or ${bigger.toLowerCase()} so the ranges have room to stand apart. Your previous build is retained.`;
+  if(/court|yard|open to the sky/.test(reason))return `Turn off the enclosed court, or ${bigger.toLowerCase()}. Your previous build is retained.`;
+  if(/stair|landing|carried|open air/.test(reason))return `Reduce the storeys from ${settings.floors}, or ${bigger.toLowerCase()} so a stair has room to land. Your previous build is retained.`;
+  return `Try another seed, or ${bigger.toLowerCase()}. Your previous build is retained.`;
 }
 export function generatePlan(settings:Settings):Plan {const result=tryGenerate(settings);if(!result.ok)throw new Error(result.error);return result.plan;}

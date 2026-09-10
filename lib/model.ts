@@ -78,7 +78,20 @@ export type Navigation={maxDepth:number;meanDepth:number;loops:number;unreachabl
 export type { Composition } from './composition.ts';
 export type Plan={schemaVersion:2;generatorVersion:'2.0';name:string;settings:Settings;family:Family;components:BuildingComponent[];rooms:Room[];floors:Floor[];openings:Opening[];stairs:Stair[];chimneys:Chimney[];articulation:Articulation[];reservations:Reservation[];motifs:Motif[];courts:Court[];routes:Route[];blocks:BlockBox[];walls:BlockBox[];slabs:BlockBox[];roofs:BlockBox[];supports:BlockBox[];bounds:Rect;minY:number;maxY:number;width:number;depth:number;totalArea:number;entry:Point;connections:[string,string][];suites:Suite[];validation:{valid:boolean;issues:string[]};navigation:Navigation;composition:import('./composition.ts').Composition;signature:string};
 export type BuildingPlanV2=Plan;
-export type GenerationResult={ok:true;plan:Plan}|{ok:false;error:string};
+/**
+ * One of the compositions the search considered for a seed. §5.4 asks for a diverse set of promising
+ * candidates to be preserved rather than only the most compact footprint, and this is that set: enough of
+ * each to choose by, and the attempt number to build it again exactly, since the same attempt of the same
+ * seed always composes the same estate.
+ */
+export type Alternative={
+  attempt:number;rank:number;navigation:number;composition:number;
+  volumes:number;yards:number;rooms:number;
+  /** What became of it: the one returned, one that would have done, one the audit refused, or one never reached. */
+  state:'chosen'|'sound'|'rejected'|'unexamined';
+  issue?:string;
+};
+export type GenerationResult={ok:true;plan:Plan;alternatives:Alternative[]}|{ok:false;error:string};
 export const FAMILIES:Record<BuildKind,{id:Family;name:string;description:string}[]>={
  manor:[{id:'crosswing',name:'Hall & crosswings',description:'A tall hall between domestic and service ranges.'},{id:'tower-residence',name:'Tower residence',description:'A residential tower with a hall and lower annexes.'},{id:'courtyard-manor',name:'Courtyard manor',description:'A rich residence grown around an intimate court.'},{id:'accumulated-estate',name:'Accumulated estate',description:'Connected households, halls and successive additions.'}],
  castle:[{id:'courtyard-castle',name:'Courtyard castle',description:'Ranges set round a central court, entered through a gatehouse.'},{id:'keep-bailey',name:'Keep & bailey',description:'A dominant keep, domestic buildings and a defended yard.'},{id:'tower-cluster',name:'Clustered towers',description:'Unequal towers connected by residential ranges.'},{id:'palace',name:'Courtyard palace',description:'A grand hall, apartments and a chapel around a court.'},{id:'double-ward',name:'Inner & outer wards',description:'Two linked compounds with separate gatehouses.'}],

@@ -247,6 +247,32 @@ composition tried:
   doors out of the private half.
 - A **yard** is a way through, not a dead end with a gate on it.
 
+## Choosing between the compositions a seed made
+
+A seed composed several estates, the best of them was returned, and the rest were thrown away. So the only
+number a reader could act on was the seed, and the only way to see another composition was to lose the one
+they had.
+
+`tryGenerate` now returns the compositions it considered along with the one it chose — §5.4's *preserve a
+diverse set of promising candidates rather than taking only the most compact footprint*. Each carries its
+rank, its navigability and composition scores, how many volumes, yards and rooms it has, what became of it,
+and the **attempt number** that built it. The same attempt of the same seed always composes the same estate,
+so an attempt number is the whole of what it takes to build one again: the studio shows the list beside the
+composition score and rebuilds whichever you pick.
+
+Four and a half compositions per seed on average. **Half of them differ from the one chosen in massing**, not
+only in labels — a different count of volumes, a different arrangement of them — so the list is a list of
+estates rather than a list of copies. About one in nine will not stand up when you pick it, because the
+search only pays for the built check on candidates it might return; picking one of those costs a message
+rather than a plan.
+
+And that message now proposes something. §17.4 asks that impossible constraints come back as a specific
+conflict with proposed relaxations, and *try a different seed or a larger footprint* was not a proposal.
+What to change is said in terms of what actually went wrong: a room stretched into a strip suggests fewer
+storeys as well as more ground; a route that will not close suggests another seed; a yard with a lid on it
+suggests turning the enclosed court off; a stair with nowhere to land suggests fewer storeys. Every one of
+them still ends by saying the previous build is retained.
+
 ## Rooms a player needs, and rooms a house should have had
 
 Two gaps, one on each side of the same list.

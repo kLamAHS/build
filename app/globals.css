@@ -26,6 +26,7 @@ select{font:inherit;background:#fcfcf7;border:1px solid #d6ddcd;border-radius:5p
 /* How a room is reached: the navigability summary and the walk from the entrance. */
 .navigability{display:inline-flex;align-items:center;gap:8px;margin-top:11px;padding:6px 11px;border:1px solid #dbe2d3;background:#f4f7ee;border-radius:5px;font-size:12px;color:#7c916b;flex-wrap:wrap}
 .navigability svg{color:#8ba179}
+.alternatives-button{margin-top:9px}
 .navigability strong{font-family:Georgia,serif;font-size:17px;font-weight:400;color:#3f654b;line-height:1}
 .navigability>span{letter-spacing:1.2px;font-size:10px;text-transform:uppercase}
 .navigability em{font-style:normal;color:#8a9a7d;padding-left:9px;border-left:1px solid #dde4d5}
