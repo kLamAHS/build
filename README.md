@@ -37,9 +37,9 @@ as a strip could have come from the programme that asked for it, the composition
 the cut that divided the range. The plan view carries four overlays that each show one stage, chosen from the
 toolbar or by passing `diagnostics` to `PlanDrawing`.
 
-- **Volumes** — every range outlined and labelled with its kind, its proportions, its storeys and how many
-  volumes it stands from the hall, with a line for each wall two of them share. This is the composition
-  stage: a straggling arm shows here as a chain of high numbers.
+- **Volumes** — every range outlined and labelled with its kind, its proportions, its storeys, the build it
+  belongs to and how many volumes it stands from the hall, shaded by age, with a line for each wall two of
+  them share. This is the composition stage: a straggling arm shows here as a chain of high numbers.
 - **Circulation** — every doorway drawn as a line between the rooms it joins, every room as a dot carrying
   the number of doors from the entrance, circulation and destinations coloured apart, and any room a
   household is forced to cross ringed in red.
@@ -164,12 +164,45 @@ annotation, rather than an unexplained grey gap in the boards. The audit rejects
 onto one — the route test would have caught it as a missing floor, but a household walking off a landing into
 the stair well deserves to be told what it is.
 
+## Construction history
+
+Every range of every seat used to be the same masonry, the same rhythm and the same window, because nothing
+in the plan recorded that a household builds against what is already standing.
+
+Each volume now belongs to a **build**. Phase 0 is inherited fabric: a core that was already there when this
+household began adding to it. Phases 1 and up are its own campaigns, taken two additions at a time in the
+order the composition placed them. Nothing here simulates history by nudging vertices about — a phase is a
+fact about a volume, and the masonry, the framing and the windows are then answerable to it.
+
+Not every seat grew. A formal quadrangle is raised in one go, and so is a quarter of everything else, on a
+decision taken off the seed rather than off the running sequence so that it does not shift a composition a
+seed already produces. A plan raised in one campaign has no phase 0 at all: one masonry, one rhythm, no seam.
+Nor does a plan the budget allowed nothing to be added to — a lone core is not inherited from anybody, it is
+simply the one build there ever was. Across the 960-setting sweep 382 seats keep inherited fabric and 578
+were raised in a single campaign.
+
+What the phase changes:
+
+- **Masonry.** A retained core carries one more block of wall than the later ranges around it, so the join
+  between an old range and a new one is a visible step in the facade rather than a line on a drawing.
+- **Framing.** An upper storey outside a castle is a timber frame on its studs — but never on a retained
+  core, which is masonry all the way up. 140 plans in the sweep carry framing.
+- **Rhythm.** An older wall was raised when a wall was structure before it was anything else, so it takes
+  wider piers and a coarser bay spacing; a later range can afford to be mostly window.
+- **Light.** In a retained core every opening but the showpiece ones — the hall, the chapel — is a single
+  block deep in its embrasure. Across the sweep every ordinary light in a retained core is a slit, against
+  56% of ordinary lights in later ranges taking the full width.
+
+The **volumes** overlay names the build each range belongs to and shades it by age, so a seam in the drawing
+can be traced back to the stage that made it.
+
 ## Wall mass
 
 A wall one block thick whatever it carries reads as a line rather than as masonry, and the drawing has to
 fake the difference with a heavier stroke. An outside wall now has its real thickness — three blocks on a
-castle, two otherwise, one less again where an upper storey is timber-framed — and an internal partition
-stays one, so the structural hierarchy is in the geometry rather than in the linework.
+castle, two otherwise, one more again on a retained core and one less where an upper storey is timber-framed
+— and an internal partition stays one, so the structural hierarchy is in the geometry rather than in the
+linework.
 
 The thickness is taken **outward**. A room keeps the floor it was cut with, so nothing downstream of the
 composition moves: routes, door approaches, furniture and the audit all still see the plan they were given.
@@ -188,13 +221,13 @@ pantry as for a great hall, and on an upper storey it fell wherever that floor's
 
 A wall is now divided into **bays** before anything is cut into it. The bay lines come from the range itself —
 a pier at each corner, then an even rhythm at roughly six blocks, or seven for a tower, with heavier piers on
-a castle and no bay at all inside a chamfered corner. The same lines serve every storey, so an upper light
-stands over the one below rather than over nothing. Across the standard set 65% of upper lights now stand
-over a lower one, against 48% before.
+a castle, wider piers and a coarser spacing on a retained core, and no bay at all inside a chamfered corner.
+The same lines serve every storey, so an upper light stands over the one below rather than over nothing.
+Across the standard set 65% of upper lights now stand over a lower one, against 48% before.
 
 What a bay gets depends on what is behind it. A hall or a chapel takes a tall light and a second tier above
 it where the volume is carried through two storeys; a chamber or a study takes an ordinary one; a store or a
-passage takes a slit, set higher. A bay is refused where the wall is a doorway, where a hearth or an oven
+passage takes a slit, set higher; and in a retained core everything but the showpiece lights is a slit. A bay is refused where the wall is a doorway, where a hearth or an oven
 stands against it as a mass of masonry, where the room behind is a stair, or where the light and a pier
 either side would not all belong to the same room — which is what keeps a window out of a corner pier and
 off an internal division.

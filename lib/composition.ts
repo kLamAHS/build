@@ -24,10 +24,14 @@ export type Composition={
  * Where the bays fall on a range's walls: a pier at each corner, then an even rhythm at about six blocks —
  * seven for a tower, heavier piers on a castle, and nothing inside a chamfered corner. One description,
  * used by the generator to place its openings and by the drawing to show where it put them.
+ *
+ * The rhythm answers to the build a range belongs to. A retained core was raised when a wall was structure
+ * before it was anything else, so it takes wider piers and fewer openings; the ranges added against it are
+ * later work, and their walls can afford to be mostly window.
  */
 export function bayLines(c:BuildingComponent,castle:boolean){
-  const chamfer=c.kind==='tower'?Math.min(4,Math.floor(c.bounds.w/5)):0;
-  const pier=Math.max(castle?3:2,chamfer+1),target=c.kind==='tower'?7:6;
+  const chamfer=c.kind==='tower'?Math.min(4,Math.floor(c.bounds.w/5)):0,old=c.phase===0;
+  const pier=Math.max(castle?3:2,chamfer+1)+(old?1:0),target=(c.kind==='tower'?7:6)+(old?2:0);
   const centres=(from:number,to:number)=>{
     const span=to-from-2*pier,out:number[]=[];
     if(span<4)return out;

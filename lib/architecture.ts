@@ -118,6 +118,18 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   const family=s.family==='auto'?pick(FAMILIES[s.kind]).id:s.family;
   const reference=s.seed==='HALL-CROSSWING'&&s.kind==='manor'&&family==='crosswing'&&s.size===128;
   const components:BuildingComponent[]=[];
+  // Which build a range belongs to. Nothing here simulates history by moving vertices about: a phase is a
+  // fact about a volume that the masonry, the roof and the windows are then answerable to.
+  //
+  // Phase 0 is reserved for inherited fabric: a core that was already standing when the household began
+  // building against it. Not every seat grew that way — a formal quadrangle is raised in one campaign, and
+  // one raised all at once has no seam, no retained wall and one rhythm across every facade. Such a plan
+  // starts at phase 1 and stays there. The choice is taken off the seed rather than the running sequence,
+  // so it does not shift the composition a seed already produces.
+  const unified=['courtyard-manor','palace'].includes(family)||hash(`${s.seed}:${family}:unified`)%4===0;
+  let phase=unified?1:0;
+  /** Begin a later build, unless this composition was raised in a single campaign. */
+  const build=(n:number)=>{phase=unified?1:n;};
   const small=s.size<80, organic=s.organic/100;
   const hallW=small?16:ri(20,26),hallD=small?22:ri(32,40);
   function add(kind:ComponentKind,name:string,bounds:Rect,storeys:number,parent?:BuildingComponent,roof?:BuildingComponent['roof']) {
@@ -125,7 +137,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     const chamfer=kind==='tower'?Math.min(4,Math.floor(bounds.w/5)):0;
     const {x,z,w,d}=bounds;
     const polygon=chamfer?[{x:x+chamfer,z},{x:x+w-chamfer,z},{x:x+w,z:z+chamfer},{x:x+w,z:z+d-chamfer},{x:x+w-chamfer,z:z+d},{x:x+chamfer,z:z+d},{x,z:z+d-chamfer},{x,z:z+chamfer}]:rectPolygon(bounds);
-    const c:BuildingComponent={id:`c${components.length}`,name,kind,bounds,polygon,baseY:0,storeys,topY:kind==='hall'?Math.min(18,s.floors*6):storeys*6,roof:roof||(kind==='tower'?(s.kind==='castle'&&rng()<.55?'battlement':'pyramid'):(kind==='workshop'&&rng()<.3?'gable-x':w>d?'gable-x':'gable-z')),parentId:parent?.id,phase:components.length?1+Math.floor(components.length/3):0};
+    const c:BuildingComponent={id:`c${components.length}`,name,kind,bounds,polygon,baseY:0,storeys,topY:kind==='hall'?Math.min(18,s.floors*6):storeys*6,roof:roof||(kind==='tower'?(s.kind==='castle'&&rng()<.55?'battlement':'pyramid'):(kind==='workshop'&&rng()<.3?'gable-x':w>d?'gable-x':'gable-z')),parentId:parent?.id,phase};
     components.push(c); return c;
   }
   function attach(parent:BuildingComponent,kind:ComponentKind,name:string,side:'n'|'s'|'e'|'w',w:number,d:number,storeys:number,offset?:number) {
@@ -173,6 +185,8 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       if(service)attach(service,'workshop','East service court','s',service.bounds.w,30,1,0);
     }
   }
+  // The core stands; everything after it is a later build against what was already there.
+  build(1);
   // A chapel belongs to the lord's side of the house: off the great chamber or the hall, reached without
   // crossing the kitchens. The service range is a last resort, and even then the chapel keeps its own antechapel.
   if(!small&&s.chapel&&s.kind!=='house'){
@@ -268,7 +282,10 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     }
     return undefined;
   }
-  for(const need of programme()){
+  const wanted=programme();
+  for(const [order,need] of wanted.entries()){
+    // An estate is not raised all at once: each pair of additions belongs to a later build than the last.
+    build(Math.min(3,1+Math.floor(order/2)));
     // A cross-range is the strongest move where the composition has already left a gap, so it is offered
     // first; otherwise the seed decides between a wing and a range across a yard.
     let made=rng()<.5?opCross(need):undefined;
@@ -280,8 +297,12 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       made=yard?opCourtRange(need,parent,side,ri(14,22)):opWing(need,parent,side,align);
     }
   }
+  build(3);
   if(family==='keep-bailey'&&!small&&domestic)attach(domestic,'workshop','Garrison range','n',26,34,Math.min(2,s.floors),0);
   if(family==='double-ward'&&!small){const end=[...components].sort((a,b)=>b.bounds.x+b.bounds.w-a.bounds.x-a.bounds.w)[0];attach(end,'gatehouse','Outer ward gate','e',16,14,1,0);}
+  // A core is only inherited if something was later built against it. Where the budget allowed nothing else,
+  // what stands is simply the one build there ever was, and it is treated as such.
+  if(!components.some(c=>c.phase>0))for(const c of components)c.phase=1;
   // Compact budgets keep the same minimum stair and room sizes; optional ranges are omitted.
   const p:Plan={schemaVersion:2,generatorVersion:'2.0',name:reference?'Alderhall Manor':`${pick(names)}${pick(['wick','mere','ford','haven'])} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,family,components,rooms:[],floors:[],openings:[],stairs:[],chimneys:[],courts:[],routes:[],blocks:[],walls:[],slabs:[],roofs:[],supports:[],bounds:{x:0,z:0,w:0,d:0},minY:s.cellar?-6:0,maxY:0,width:0,depth:0,totalArea:0,entry:{x:0,z:0},connections:[],suites:[],validation:{valid:true,issues:[]},navigation:{maxDepth:0,meanDepth:0,loops:0,unreachable:[],transits:[],strandedRooms:0,compromises:0,score:0},composition:{volumes:0,reach:0,spread:0,yards:0,hierarchy:0,frontage:0,score:0},signature:''};
   function room(c:BuildingComponent,name:string,kind:RoomKind,bounds:Rect,y:number,ceiling=y+6,shape:RoomShape='rect',shapeSide:'n'|'s'|'e'|'w'='e',notch?:Rect,corners?:DaisCorners){
@@ -1295,6 +1316,11 @@ function buildGeometry(p:Plan){
   const outline=(polygon:Point[],y:number,h:number,material:number,kind:BlockBox['kind'],id:string)=>{
     for(let i=0;i<polygon.length;i++){const a=polygon[i],b=polygon[(i+1)%polygon.length],steps=Math.max(Math.abs(b.x-a.x),Math.abs(b.z-a.z));for(let j=0;j<=steps;j++){const t=steps?j/steps:0;box({x:Math.round(a.x+(b.x-a.x)*t),z:Math.round(a.z+(b.z-a.z)*t),w:1,d:1},y,h,material,kind,id);}}
   };
+  // How much masonry a range carries, and whether an upper storey is framed instead. Both answer to the phase
+  // a range was built in, so a retained core reads as the older, heavier build it is.
+  const shell=p.settings.kind==='castle'?3:2;
+  const shellOf=(c:BuildingComponent)=>c.phase===0?shell+1:shell;
+  const framed=(c:BuildingComponent,y:number)=>y>=6&&p.settings.kind!=='castle'&&c.phase>0;
   for(const c of p.components){
     if(c.kind==='court')continue;
     const b=c.bounds;
@@ -1346,7 +1372,7 @@ function buildGeometry(p:Plan){
   for(const c of p.components){
     if(c.kind==='hall'||c.kind==='tower')outline(c.polygon,c.baseY,c.topY-c.baseY,1,'wall',c.id);
     else for(let y=c.baseY;y<c.topY;y+=6){
-      const r=componentFootprint(c,y,p.family),timber=y>=6&&p.settings.kind!=='castle';
+      const r=componentFootprint(c,y,p.family),timber=framed(c,y);
       outline(rectPolygon(r),y,6,timber?5:1,'wall',c.id);
       if(timber){
         outline(rectPolygon(r),y,1,2,'wall',c.id);
@@ -1357,9 +1383,9 @@ function buildGeometry(p:Plan){
   }
   // ---- Wall mass. A wall that is one block thick whatever it carries reads as a line, not as masonry, and
   // the drawing has to fake the difference with a heavier stroke. An outside wall is given its real thickness
-  // here — three blocks for a castle, two otherwise — and it is taken outward, so a room keeps the floor it
-  // was cut with and a wall two ranges share stays one wall between them rather than becoming two.
-  const shell=p.settings.kind==='castle'?3:2;
+  // here — three blocks for a castle, two otherwise, one more again on a retained core — and it is taken
+  // outward, so a room keeps the floor it was cut with and a wall two ranges share stays one wall between
+  // them rather than becoming two.
   /** The bands of wall a range actually carries: one tall shell for a hall or tower, one per storey elsewhere. */
   const wallBands=(c:BuildingComponent):[Rect,number,number][]=>{
     if(c.kind==='hall'||c.kind==='tower')return [[c.bounds,c.baseY,c.topY-c.baseY]];
@@ -1374,9 +1400,9 @@ function buildGeometry(p:Plan){
     // A chamfered tower has no straight face to thicken outward; its shell keeps the polygon it was cut with.
     if(c.kind==='court'||c.polygon.length>4)continue;
     for(const [f,y,h] of wallBands(c)){
-      const timber=c.kind!=='hall'&&c.kind!=='tower'&&y>=6&&p.settings.kind!=='castle';
+      const timber=c.kind!=='hall'&&c.kind!=='tower'&&framed(c,y);
       // An upper storey in timber is a lighter frame than the masonry below it.
-      const depth=timber?shell-1:shell;
+      const depth=timber?shellOf(c)-1:shellOf(c);
       if(depth<2)continue;
       for(const [side,along,from,to] of [
         ['n',f.z,f.x,f.x+f.w],['s',f.z+f.d,f.x,f.x+f.w],
@@ -1430,8 +1456,11 @@ function buildGeometry(p:Plan){
       const room=level.find(r=>r.componentId===c.id&&holds(r,inner.x,inner.z));
       const wants=room&&LIGHT[room.kind];
       if(!room||!wants)return false;
+      // A wall a block thicker than its neighbours' was not glazed like them: in a retained core every light
+      // but the showpiece ones is a single opening deep in its embrasure.
+      const asked=c.phase===0&&room.kind!=='hall'&&room.kind!=='sacred'?{...wants,width:1}:wants;
       // A wall with no room for a pier either side of a full light still takes a single-block one.
-      const light=narrow?{...wants,width:1}:wants;
+      const light=narrow?{...asked,width:1}:asked;
       const start=at-Math.floor(light.width/2);
       // A pier either side: every cell of the light and one beyond it belongs to the one room behind.
       for(let w=-1;w<=light.width;w++){

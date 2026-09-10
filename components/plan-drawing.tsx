@@ -8,7 +8,7 @@ import type { BlockLayer } from '@/lib/voxels';
 export type Diagnostic='off'|'volumes'|'circulation'|'facade'|'fit';
 export const DIAGNOSTICS:{id:Diagnostic;name:string;hint:string}[]=[
   {id:'off',name:'None',hint:'The finished drawing'},
-  {id:'volumes',name:'Volumes',hint:'What was composed, and how far each range stands from the hall'},
+  {id:'volumes',name:'Volumes',hint:'What was composed, which build each range belongs to, and how far it stands from the hall'},
   {id:'circulation',name:'Circulation',hint:'Every doorway, how many you cross to reach a room, and any forced crossing'},
   {id:'facade',name:'Facade bays',hint:'The bay lines each wall was divided into, and which took a light'},
   {id:'fit',name:'Room fit',hint:'How near each room stands to the proportion and area it is allowed'},
@@ -17,10 +17,15 @@ export type DrawingOptions={labels:boolean;furniture:boolean;grid:boolean;dimens
 // The limits the audit rejects a candidate on, so the overlay shows the same line the generator is held to.
 const ASPECT_LIMIT=3.2,AREA_LIMIT=760;
 const ORDINARY=new Set(['bedroom','study','service','storage']);
+// The builds a composition was raised in, oldest first: the retained core reads heaviest, later work lighter.
+const PHASE_FILL=['#3d6f9e33','#3d6f9e22','#3d6f9e14','#3d6f9e0a'];
 function Diagnostics({plan,floor,mode}:{plan:Plan;floor:Floor;mode:Diagnostic}){
   const y=floor.elevation;
   if(mode==='volumes'){
     const hall=plan.components.find(c=>c.kind==='hall');
+    // Phase 0 is inherited fabric; a composition raised in one campaign has none, and says so rather than
+    // numbering a single build as though it followed something.
+    const grew=plan.components.some(c=>c.phase===0);
     const depth=new Map<string,number>();
     if(hall){
       depth.set(hall.id,0);const queue=[hall];
@@ -34,9 +39,10 @@ function Diagnostics({plan,floor,mode}:{plan:Plan;floor:Floor;mode:Diagnostic}){
         const form=long>=short*1.7?'range':long>=short*1.25?'block':'square';
         const away=depth.get(c.id);
         return <g key={c.id} opacity={c.baseY<=y&&y<c.topY?1:.35}>
-          <rect x={b.x} y={b.z} width={b.w} height={b.d} fill={c.kind==='court'?'#4a7fb51a':'#4a7fb50d'} stroke="#3d6f9e" strokeWidth=".4" strokeDasharray={c.kind==='court'?'2 1.4':undefined}/>
+          <rect x={b.x} y={b.z} width={b.w} height={b.d} fill={c.kind==='court'?'#4a7fb51a':PHASE_FILL[Math.min(PHASE_FILL.length-1,c.phase)]} stroke="#3d6f9e" strokeWidth=".4" strokeDasharray={c.kind==='court'?'2 1.4':undefined}/>
           <text x={b.x+1} y={b.z+3} fontSize="1.6" fill="#2f5c85" style={halo}>{c.kind}</text>
           <text x={b.x+1} y={b.z+5.2} fontSize="1.3" fill="#5b7f9e" style={halo}>{b.w}×{b.d} · {form} · {c.storeys}s{away===undefined?' · adrift':away?` · ${away} from hall`:' · hall'}</text>
+          <text x={b.x+1} y={b.z+7.4} fontSize="1.3" fill="#5b7f9e" style={halo}>{!grew?'single build':c.phase?`build ${c.phase}`:'retained core'}</text>
         </g>;})}
       {plan.components.flatMap((c,i)=>plan.components.slice(i+1).filter(o=>abut(c.bounds,o.bounds)).map(o=>
         <line key={`${c.id}-${o.id}`} x1={c.bounds.x+c.bounds.w/2} y1={c.bounds.z+c.bounds.d/2} x2={o.bounds.x+o.bounds.w/2} y2={o.bounds.z+o.bounds.d/2} stroke="#3d6f9e" strokeWidth=".35" opacity=".5"/>))}

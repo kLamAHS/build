@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { candidateCount, generateCandidate, generatePlan, rank, tryGenerate } from './architecture.ts';
-import { compositionReport } from './composition.ts';
+import { bayLines, compositionReport } from './composition.ts';
 import { DEFAULT_SETTINGS, FAMILIES, insidePolygon, intersects, type Settings, type Plan, type Rect } from './model.ts';
 import { voxelize, prepareMeshes, SparseBlocks } from './voxels.ts';
 import { auditArchitecture } from './architectural-audit.ts';
@@ -508,4 +508,49 @@ void test('the courtyard castle is organised by its site: gate, court, hall, ser
   const small=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'courtyard-castle',size:128,floors:3,seed:'SCALE'});
   const large=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'courtyard-castle',size:480,floors:3,seed:'SCALE'});
   assert.ok(large.totalArea>small.totalArea*1.5,`480 blocks buys ${large.totalArea} against ${small.totalArea} for 128`);
+});
+
+void test('a retained core is heavier than what was built against it',()=>{
+  // The defect this answers: every range of every seat was the same masonry, the same rhythm and the same
+  // window, because nothing in the plan recorded that a household builds against what is already standing.
+  let inherited=0,single=0,heavier=0,coarser=0;
+  const settings=(['house','manor','castle'] as const).flatMap(kind=>FAMILIES[kind].flatMap(f=>
+    [128,256,384].map(size=>({...DEFAULT_SETTINGS,kind,size,floors:3,seed:`PHASE-${size}`,family:f.id}))));
+  for(const s of settings){
+    const p=generatePlan(s);
+    const tag=`${s.kind}/${s.family}/${s.size}`;
+    // A phase is a fact about every volume, and the builds a plan carries run without a gap.
+    const builds=[...new Set(p.components.map(c=>c.phase))].sort((a,b)=>a-b);
+    assert.ok(builds.every(n=>Number.isInteger(n)&&n>=0),`${tag}: a range belongs to no build`);
+    assert.deepEqual(builds,builds.map((_,i)=>builds[0]+i),`${tag}: the builds skip one: ${builds.join(', ')}`);
+    // Phase 0 is inherited fabric, so it only exists where something was later built against it.
+    const core=p.components.filter(c=>c.phase===0);
+    if(!core.length){single++;continue;}
+    inherited++;
+    assert.ok(p.components.some(c=>c.phase>0),`${tag}: a retained core with nothing standing against it`);
+    // Nothing in a retained core is a timber frame: that is the later builds' lighter construction.
+    const coreIds=new Set(core.map(c=>c.id));
+    const frame=p.blocks.filter(b=>b.material===5&&coreIds.has(b.componentId));
+    assert.equal(frame.length,0,`${tag}: ${frame.length} blocks of framing in the retained core`);
+    // How far a range's masonry is carried outward past the footprint it was cut with.
+    const plain=p.components.filter(c=>c.kind!=='court'&&c.polygon.length===4);
+    const mass=new Map(plain.map(c=>[c.phase,0]));
+    for(const c of plain){
+      let out=0;
+      for(const b of p.blocks){
+        if(b.componentId!==c.id||b.kind!=='wall')continue;
+        out=Math.max(out,c.bounds.x-b.x,b.x-(c.bounds.x+c.bounds.w),c.bounds.z-b.z,b.z-(c.bounds.z+c.bounds.d));
+      }
+      mass.set(c.phase,Math.max(mass.get(c.phase)??0,out));
+    }
+    const later=[...mass.entries()].filter(([n])=>n>0).map(([,m])=>m);
+    if(mass.has(0)&&later.length&&mass.get(0)!>Math.max(...later))heavier++;
+    // An older wall carries fewer, more widely spaced openings than the ranges added against it.
+    const rhythms=new Map(p.components.map(c=>[c.phase,bayLines(c,s.kind==='castle').target]));
+    if(rhythms.has(0)&&[...rhythms].some(([n,t])=>n>0&&t<rhythms.get(0)!))coarser++;
+  }
+  assert.ok(inherited>8,`only ${inherited} of ${settings.length} seats keep any inherited fabric`);
+  assert.ok(single>8,`only ${single} of ${settings.length} seats were raised in one campaign`);
+  assert.ok(heavier>=inherited*.8,`only ${heavier} of ${inherited} retained cores are heavier than their later ranges`);
+  assert.ok(coarser>=inherited*.8,`only ${coarser} of ${inherited} retained cores take a coarser rhythm`);
 });
