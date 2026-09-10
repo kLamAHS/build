@@ -100,18 +100,18 @@ void test('a chamfered tower no longer has floating square merlons at its boundi
 });
 void test('compiled geometry, material patches and exact state exports are deterministic',()=>{
   const plan=architectureFixture(),a=buildDetailedModel(plan),b=buildDetailedModel(plan);assert.deepEqual(snapshot(a.grid),snapshot(b.grid));
-  assert.deepEqual(wholeBuilding(plan,a.grid),wholeBuilding(plan,b.grid));
+  assert.deepEqual(wholeBuilding(plan,a.grid,{audited:false}),wholeBuilding(plan,b.grid,{audited:false}));
   const changed=architectureFixture();changed.settings.seed='ANOTHER';assert.notDeepEqual(snapshot(a.grid),snapshot(buildDetailedModel(changed).grid));
 });
 void test('tall roofs and negative coordinates are fully enclosed in whole-building exports',()=>{
-  const plan=architectureFixture(),model=buildDetailedModel(plan),s=wholeBuilding(plan);
+  const plan=architectureFixture(),model=buildDetailedModel(plan),s=wholeBuilding(plan,undefined,{audited:false});
   assert.ok(model.maxY>plan.maxY);assert.ok(s.palette.length>9);assert.ok(s.palette.some(p=>p.props?.facing));
   model.grid.forEach((x,y,z)=>{const at=cellIndex(s.size,x-s.origin!.x,y-s.origin!.y,z-s.origin!.z);
     assert.ok(at>=0&&at<s.cells.length);const expected=model.grid.stateAt(x,y,z)?.key;
     assert.ok(s.cells[at]>0);if(expected)assert.equal(paletteKey(s.palette[s.cells[at]]),expected);
   });
   assert.equal(s.cells.reduce((sum,v)=>sum+(v?1:0),0),model.grid.stats().blocks);
-  const raw=wholeBuilding(plan,voxelize(plan));assert.deepEqual(raw,s,'A caller-supplied structural grid must still receive the same architectural treatment');
+  const raw=wholeBuilding(plan,voxelize(plan),{audited:false});assert.deepEqual(raw,s,'A caller-supplied structural grid must still receive the same architectural treatment');
 });
 
 // Independent NBT reader: deliberately does not call any of the writer's parsing helpers.
@@ -132,7 +132,7 @@ function readNbt(bytes:Uint8Array){
   assert.equal(byte(),10);assert.equal(text(),'');const result=value(10);assert.equal(at,bytes.length);return result as Record<string,Record<string,Tag>>;
 }
 void test('gzipped NBT round-trips all properties and every packed cell across 64-bit boundaries',async()=>{
-  const s=wholeBuilding(architectureFixture()),file=await litematicaFile(s,1700000000000),nbt=readNbt(gunzipSync(file));
+  const s=wholeBuilding(architectureFixture(),undefined,{audited:false}),file=await litematicaFile(s,1700000000000),nbt=readNbt(gunzipSync(file));
   const region=nbt.Regions[s.name] as unknown as {BlockStatePalette:State[];BlockStates:bigint[]};
   assert.equal(nbt.Version,5);assert.equal(nbt.MinecraftDataVersion,2586);assert.equal(nbt.Metadata.TimeCreated,BigInt(1700000000000));
   const palette=region.BlockStatePalette.map(p=>stateKey(p.Name,p.Properties??{}));assert.deepEqual(palette,s.palette.map(paletteKey));
@@ -147,7 +147,7 @@ void test('gzipped NBT round-trips all properties and every packed cell across 6
 void test('invalid block states and inconsistent schematic palettes fail rather than silently corrupt exports',()=>{
   for(const text of ['stone_bricks','minecraft:stone[x=]','minecraft:stone[x=a,x=b]'])assert.throws(()=>parseBlockState(text));
   assert.deepEqual(parseBlockState('minecraft:spruce_stairs[facing=north,half=top]'),{name:'minecraft:spruce_stairs',properties:{facing:'north',half:'top'}});
-  const s=wholeBuilding(architectureFixture(),voxelize(architectureFixture()));
+  const s=wholeBuilding(architectureFixture(),voxelize(architectureFixture()),{audited:false});
   assert.throws(()=>nbtBytes({...s,size:{x:1,y:1,z:1}}));assert.throws(()=>nbtBytes({...s,palette:[{name:'minecraft:stone'}]}));
   assert.throws(()=>packBlockStates(new Uint16Array([4]),2));assert.throws(()=>packBlockStates(new Uint16Array([0]),1));
 });

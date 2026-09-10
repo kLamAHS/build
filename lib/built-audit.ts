@@ -93,6 +93,9 @@ export function auditBuiltModel(plan: Plan, grid: SparseBlocks, assemblies: Retu
 }
 export function assertBuildable(plan: Plan, grid: SparseBlocks): BuiltAudit {
   const report = auditBuiltModel(plan, grid);
-  if (!report.valid) { const errors = report.issues.filter(i => i.severity === 'error'); throw new Error(`Finished build failed ${errors.length} physical checks: ${errors.slice(0, 5).map(i => i.message).join(' ')} Your previous build is retained.`); }
+  if (!report.valid) {
+    const errors = report.issues.filter(i => i.severity === 'error');
+    throw new Error(`This building fails ${errors.length} physical check${errors.length === 1 ? '' : 's'} and has not been written: ${errors.slice(0, 5).map(i => i.message).join(' ')}`);
+  }
   return report;
 }

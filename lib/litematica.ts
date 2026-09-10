@@ -2,6 +2,7 @@ import { voxelize, type SparseBlocks } from './voxels.ts';
 import { type Floor, type Plan } from './model.ts';
 import { BASE_BLOCKS, parseBlockState, stateKey } from './block-states.ts';
 import { buildDetailedModel, DETAIL_VERSION } from './architectural-detail.ts';
+import { assertBuildable } from './built-audit.ts';
 
 /**
  * Litematica schematics, so a plan can be pasted into the world and built against.
@@ -120,13 +121,19 @@ export function floorOutline(plan:Plan,floor:Floor,grid:SparseBlocks=voxelize(pl
  * `lib/architectural-detail.ts`: one model, meshed for the viewer and written out here, so what you paste is
  * what you looked at. A grid that has already been compiled is written as it stands; a bare structural one
  * is compiled first, so no caller can quietly export the massing model by passing the wrong grid.
+ *
+ * A schematic that fails the finished-building audit is not written at all: a castle with a room you cannot
+ * reach is not something anyone wants pasted into a world. `audited: false` exists for the authored reference
+ * composition and the test fixtures, which are not generator output and whose navigation is documented as
+ * uncertified. Nothing in the application may pass it.
  */
-export function wholeBuilding(plan:Plan,grid?:SparseBlocks):Schematic {
+export function wholeBuilding(plan:Plan,grid?:SparseBlocks,{audited=true}:{audited?:boolean}={}):Schematic {
   grid=grid?.detailVersion===DETAIL_VERSION?grid:buildDetailedModel(plan,grid).grid;
   const finalGrid=grid;
   const {bounds:b,minY:low,maxY:high}=finalGrid.extent(plan.minY,plan.maxY),size={x:b.w,y:high-low+1,z:b.d};
   const volume=size.x*size.y*size.z;
   if(!Number.isSafeInteger(volume)||volume>64*1024*1024)throw new Error('This schematic exceeds 64 million cells. Reduce the footprint or storeys before exporting.');
+  if(audited)assertBuildable(plan,finalGrid);
   const blockAt=(x:number,y:number,z:number,value:number)=>finalGrid.stateAt(x,y,z)?.key??BLOCKS[value&15]??'minecraft:stone';
   const used=new Set<string>();finalGrid.forEach((x,y,z,value)=>used.add(blockAt(x,y,z,value)));
   const keys=['minecraft:air',...[...used].sort()];if(keys.length>65536)throw new Error('Too many block states for a schematic.');

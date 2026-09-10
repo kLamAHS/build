@@ -276,6 +276,13 @@ export function buildDetailedModel(plan: Plan, source?:SparseBlocks): DetailedMo
   const layout = planInteriors(context, staircases, repairs);
   furnishInteriors(context, layout);
   finishInteriorSurfaces(context, layout);
+  // Interior finishes are not permitted to win over a declared portal. Reconcile once more after them, and
+  // record only what they had actually encroached on.
+  const again: Repair[] = [];
+  reconcileOpenings(context, again);
+  shapeApproachSteps(context);
+  const reclaimed = again.filter(r => r.kind !== 'window-reveal').reduce((n, r) => n + r.cells, 0);
+  if (reclaimed) repairs.push({ kind: 'portal-reclearance', id: 'openings', cells: reclaimed, message: 'Re-opened portals that the interior finishes had encroached on' });
   const light = lightInteriors(context, layout);
   const extent = grid.extent(plan.minY, plan.maxY); grid.bounds = extent.bounds;
   grid.detailVersion=DETAIL_VERSION;

@@ -132,12 +132,15 @@ export function bed(facing:Facing,part:'head'|'foot') {return define('red_bed',{
 export const barrel=()=>define('barrel',{facing:'up',open:'false'});
 
 /**
- * A trapdoor: a table top when it is closed at the top of its cell, a headboard or a shutter when it is open
- * against one face. Three sixteenths thick either way, which is why it is not a slab.
+ * A trapdoor: a table top when it is closed, a headboard or a shutter when it is open. Three sixteenths thick
+ * either way, which is why it is not a slab. An open one hangs on the face OPPOSITE the one it faces, which
+ * is what the vanilla model does and the reverse of what the name suggests.
  */
-export function trapdoor(name='spruce_trapdoor',facing:Facing='north',half:Half='top',open=false):BlockState {
-  const box:StateBox=open?(facing==='north'?[0,0,0,1,1,.1875]:facing==='south'?[0,0,.8125,1,1,.1875]
-    :facing==='west'?[0,0,0,.1875,1,1]:[.8125,0,0,.1875,1,1]):half==='top'?[0,.8125,0,1,.1875,1]:[0,0,0,1,.1875,1];
+export function trapdoor(name='spruce_trapdoor',facing:Facing='north',half:Half='bottom',open=false):BlockState {
+  const t=3/16;
+  const box:StateBox=!open?[0,half==='top'?1-t:0,0,1,t,1]
+    :facing==='north'?[0,0,1-t,1,1,t]:facing==='south'?[0,0,0,1,1,t]
+    :facing==='west'?[1-t,0,0,t,1,1]:[0,0,0,t,1,1];
   return define(name,{facing,half,open:String(open),powered:'false',waterlogged:'false'},[box],16);
 }
 export const flowerpot=()=>define('flower_pot',{},[[.3125,0,.3125,.375,.375,.375]],16);
