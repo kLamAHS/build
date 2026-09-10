@@ -30,6 +30,59 @@ number of independent routes, the deepest reach in doors, and any room a househo
 cross. `tryGenerate` composes several candidates and keeps the one that walks best. The studio shows the
 score beside the plan name and the door-by-door walk from the entrance for whichever room is selected.
 
+## Choosing between compositions
+
+The ranker used to return the first candidate that merely stood up without a forced crossing, whatever it
+looked like — so a composition strung out in a chain of sheds was accepted as readily as a building. Every
+candidate a seed is worth is now composed and the best of them kept, on two reports rather than one.
+
+`lib/navigation.ts` asks whether you can get there. It now also counts the **compromises**: doors the access
+grammar would not have chosen, cut only because nothing else reached — service into the body of the hall, a
+chapel opening onto a chamber, a door into the middle of the hall's flank. A plan needing several of them is
+connected but compromised, and the score says so.
+
+`lib/composition.ts` asks whether the thing you are getting around is a building. It measures how far the
+composition **reaches** from the hall in volumes, what share of its ground it actually uses, how many yards
+it holds and addresses, the **hierarchy** between its principal room and its median one, and the share of
+rooms with an outside wall — a room with none can never have a window, and that is a massing question rather
+than a window one. Each dimension is bounded on its own so none of them can buy off another.
+
+`tryGenerate` ranks on `navigation × 2 + composition`: a forced crossing is the defect this generator exists
+to avoid, but between two plans that both walk, the one that is a building wins. It composes the ordinary
+budget of candidates — five, or three on a large site, because the fifth is worth about a point of rank and
+the eighth barely half of one — and keeps composing past that only while nothing yet walks without a forced
+crossing, which is where the effort belongs. Ranking happens on what is cheap to know; only the best
+candidate in turn is voxelised for the built check, which costs more than composing them all.
+
+The studio shows both scores with their components beside the plan name.
+
+## What the estate has to house, and how it is set on the ground
+
+Growth used to be a count: every twenty-four blocks of budget bought one more rectangle of `22–30 × 30–38`,
+attached to a random range on a random side. That is why the additions all read alike — they were all the
+same shape, and the only thing separating one from the next was the label on the rooms.
+
+An estate now starts from a **programme**: lodging for the household and the guests it keeps, the service
+groups a kitchen cannot hold, the workshops it works from, the towers a castle keeps, a second domestic range
+for its officers. Each entry carries the floor its use needs and the shape that floor should take — a lodging
+range is long and one rank deep because a rank of chambers is long and one rank deep; a service court is a
+compact block because brewing and baking are; a tower is square. Across a 96-plan survey, 70% of lodging
+volumes are ranges (they were 0%) and 55% of towers are compact. Room count follows from the programme
+rather than from area: a 224-block estate holds between six and twenty volumes, depending what it must house.
+
+Each entry is then set on the ground by one of three **composition moves**, not by a random side:
+
+- **a wing** square to its host, aligned on one of its ends or centred — an L, a T, or a stepped range;
+- **a range across an open yard**, where the yard is part of the composition and only the stretch the two
+  ranges share is paved, so the open ends are where a later range can close the court;
+- **a cross-range** dropped into a gap two masses already leave facing each other, joining them into one.
+
+94% of compositions now hold at least one interior yard; before, 8% did, and those were the bailey outside the
+walls. Every yard is addressed by at least two buildings and is a way through rather than a dead end, and the
+ground in front of the door is reserved before anything else is placed, so nothing is ever built across the
+approach. An estate that builds a second service court gets a laundry and a dairy rather than a second
+kitchen: each further range of a kind takes the next trade the household needs.
+
 ## Room proportion and the grain of a range
 
 A minimum area is satisfied by a strip ninety blocks long, and a target with no ceiling is satisfied by
@@ -49,8 +102,15 @@ rather than by the backs of chambers. A range too deep for one rank takes the ga
 a rank either side. Where a neighbouring range meets a flank the gallery does not reach, the rank is capped
 with a cross passage at that end, so nobody's chamber becomes the way through.
 
+A range too short for either treatment carries a stair bay down one side and a passage across each end that
+another range meets, joined to one another by the bay. Where its passage still misses a neighbour whose own
+circulation is already settled — a yard, a hall, a gallery — the passage is deepened to reach it, or run down
+that flank instead. One description of where a short range puts its passages answers both the range itself and
+every neighbour reading its wall: a neighbour told the passage is somewhere it is not builds nothing to meet
+it, and the only way left between the two is a door through whichever chamber happens to be there.
+
 Across a 288-plan survey the largest room in a range is around ten times the smallest, no ordinary room is
-more than 2.5 times its own width, and the largest has taken 551 blocks. Before this, one in twenty-nine was
+more than 3.1 times its own width, and the largest has taken 735 blocks. Before this, one in twenty-nine was
 past three times its width, the worst was eighteen times, and one pantry had taken 3,220.
 
 Shape carries meaning where it can. A chapel nave closes on a stepped half-round at the end furthest from
