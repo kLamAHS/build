@@ -3,7 +3,12 @@ import { SparseBlocks, voxelize } from './voxels.ts';
 import { solid, slab, stair, timber, wallPost, opposite, type BlockState, type Facing } from './block-states.ts';
 
 import { buildTowerCrown, enrichArchitecture } from './architectural-language.ts';
-import { furnishInteriors } from './architectural-furnishings.ts';
+import { finishInteriorSurfaces, furnishInteriors } from './architectural-furnishings.ts';
+import { buildStaircases, planStaircases, staircaseProtected, type StairAssembly } from './interior-stairs.ts';
+import { planInteriors, stripOldFittings } from './interior-layout.ts';
+import { lightInteriors, type LightField } from './interior-lighting.ts';
+import { reconcileOpenings, repairEnvelope, shapeApproachSteps, type Repair } from './building-repairs.ts';
+import { auditBuiltModel, type BuiltAudit } from './built-audit.ts';
 import type { DetailContext, DetailFeature } from './detail-context.ts';
 export const DETAIL_VERSION = 2;
 const directions: { dx: number; dz: number; facing: Facing }[] = [
@@ -51,13 +56,17 @@ function primaryRoof(box: BlockBox, c: BuildingComponent): boolean {
  * Rooms, openings, stairs, reservations, signature and source boxes are never mutated.
  * Both the viewer worker and whole-building export call this function.
  */
-export function buildDetailedModel(plan: Plan, source?:SparseBlocks): { grid: SparseBlocks; structure: SparseBlocks; minY: number; maxY: number; features: DetailFeature[] } {
+export type DetailedModel = { grid: SparseBlocks; structure: SparseBlocks; minY: number; maxY: number;
+  features: DetailFeature[]; staircases: StairAssembly[]; repairs: Repair[]; light: LightField; audit: BuiltAudit };
+export function buildDetailedModel(plan: Plan, source?:SparseBlocks): DetailedModel {
   const structure = source??voxelize(plan), grid = new SparseBlocks(plan.bounds);
   for (const [k, chunk] of structure.chunks) grid.chunks.set(k, chunk.slice());
   for(const [k,state] of structure.states)grid.states.set(k,state);
   const castle = plan.settings.kind === 'castle', seed = hash(plan.settings.seed);
   const components = new Map(plan.components.map(c => [c.id, c]));
   const shell = (c: BuildingComponent) => (castle ? 3 : 2) + (c.phase === 0 ? 1 : 0);
+  // The stair volumes are designed first: ornament has to keep out of a flight that has not been cut yet.
+  const staircases = planStaircases(plan);
   const path = new Set<string>();
   for (const route of plan.routes) for (let i = 0; i < route.points.length; i++) {
     const a = route.points[i], b = route.points[Math.min(i + 1, route.points.length - 1)];
@@ -98,7 +107,8 @@ export function buildDetailedModel(plan: Plan, source?:SparseBlocks): { grid: Sp
     guard({ bounds, test: (x, y, z) => y >= 0 && y <= 5 && within(bounds, x, z) });
   }
   const protectedAt = (x: number, y: number, z: number) =>
-    (y >= 0 && y <= 4 && path.has(cellKey(x, z))) || (guards.get(cellKey(Math.floor(x / 16), Math.floor(z / 16))) ?? []).some(g => g.test(x, y, z));
+    (y >= 0 && y <= 4 && path.has(cellKey(x, z))) || staircaseProtected(staircases, x, y, z)
+    || (guards.get(cellKey(Math.floor(x / 16), Math.floor(z / 16))) ?? []).some(g => g.test(x, y, z));
   const put = (x: number, y: number, z: number, state: BlockState, material: number, kind: BlockBox['kind'], c: BuildingComponent, replaceRoof = false) => {
     if (protectedAt(x, y, z)) return false;
     const old = grid.kindAt(x, y, z);
@@ -254,8 +264,21 @@ export function buildDetailedModel(plan: Plan, source?:SparseBlocks): { grid: Sp
       put(x, y, z, wallPost('brick_wall'), 8, 'chimney', c);
   }
   enrichArchitecture(context);
-  furnishInteriors(context);
+  // Everything above composes the outside. What follows makes the inside a place a player can actually walk
+  // through: repair what the roofs and ranges broke, cut and build the stairs, re-open every declared portal,
+  // reserve the routes between them, and only then furnish, finish and light what is left over.
+  const repairs: Repair[] = [];
+  repairEnvelope(context, repairs);
+  stripOldFittings(context, repairs);
+  buildStaircases(context, staircases, repairs);
+  reconcileOpenings(context, repairs);
+  shapeApproachSteps(context);
+  const layout = planInteriors(context, staircases, repairs);
+  furnishInteriors(context, layout);
+  finishInteriorSurfaces(context, layout);
+  const light = lightInteriors(context, layout);
   const extent = grid.extent(plan.minY, plan.maxY); grid.bounds = extent.bounds;
   grid.detailVersion=DETAIL_VERSION;
-  return { grid, structure, minY: extent.minY, maxY: extent.maxY, features };
+  const audit = auditBuiltModel(plan, grid, staircases, light);
+  return { grid, structure, minY: extent.minY, maxY: extent.maxY, features, staircases, repairs, light, audit };
 }

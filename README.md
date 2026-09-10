@@ -204,7 +204,7 @@ so it reads without a legend:
 Lay it out, and build up from it. A 512-block estate's outline is about 3 kB.
 
 **Complete building** is every block of every floor as the 3D view shows it — see *Building it, not blocking
-it out* below. About 180 kB for the largest estate the generator makes, and a second to prepare. The 3D view
+it out* below. About 260 kB for the largest estate the generator makes, and a second to prepare. The 3D view
 also has its own **Export 3D · GLB** button, which writes the same model as mesh geometry for anything that
 reads glTF: the complete building, not the cutaway you happen to be looking at.
 
@@ -281,11 +281,14 @@ hangings on blind tower bays; a developed gate arch and roof on each gatehouse, 
 
 **Material and contents.** Stone is never one stone — a patchy field three blocks across and two courses tall,
 because the hand-built castles this was measured against put the same stone above itself about half the time,
-where random mixing at that palette size would be a twelfth. Timber upstairs is oriented log; courtyard flags
-have a border and a grid; and every fitting is the thing it stands for: a lit campfire in a hearth, a furnace
-in an oven, a blast furnace and anvil at a forge, a brewing stand, bookshelves and a lectern — or the
-enchanting table, in the room programmed for one — beds in complete facing-matched pairs, and lanterns hung on
-real chains from a real overhead block, never in a doorway.
+where random mixing at that palette size would be a twelfth. Timber upstairs is oriented log, and courtyard
+flags have a border and a grid. Inside, every fitting is the thing it stands for and is built at room scale
+rather than as a labelled cuboid: a hearth is brick with a lit campfire and an iron-barred front, a table is
+boards on legs with space at its ends, a bed a real pair with a canopy where the chamber allows one, a forge a
+blast furnace and an anvil, a lectern its bookshelves — or the enchanting table, in the room programmed for
+one. Rooms get floors laid to a pattern, panelled walls, coffered or braced ceilings, a carpet where one
+belongs, and lanterns hung on real chains from a real overhead block. What may stand where, and what has to
+stay clear, is settled by the passes under *Can you actually walk through it?* below.
 
 Every state it can write existed in Java 1.16.5, which is the version the schematic file claims: a block name
 the client cannot resolve at the declared data version is not a nicer stone, it is a hole.
@@ -309,6 +312,47 @@ the finish of one.
 of this at castle scale: `npm run showcase:architecture -- ./exports/crownward` writes its `.litematic`, its
 GLB and a report of every feature placed. `docs/3d-redesign.md` records what the compiler promises and what
 was measured of it.
+
+## Can you actually walk through it?
+
+Everything above is checked against the plan. A plan can be perfectly navigable and still compile into a
+building you cannot get into: a threshold that is a wall block rather than a floor, a flight whose treads a
+partition runs through, a yard well parked in front of the only door out of a range, a chapel corner with no
+light in it. None of that is visible to a rule about rooms and doors, because none of it is about rooms and
+doors — it is about blocks.
+
+So the last thing the compiler does is put a player-sized body into the finished blocks and try to walk.
+`lib/walkability.ts` builds a graph of every place a 0.6 × 1.8 box can stand — on a half-block lattice, on
+whatever a cell's collision shape actually is, so the top of a slab is at half height and a carpet is not a
+step — and connects two of them only if you could walk between them without jumping, flying or breaking
+anything. Half a block is a step; a whole one is a jump, and a jump is not a route.
+
+`lib/built-audit.ts` then asks the questions that follow from that:
+
+- Every room can be reached **on foot from the front door**, and no room is half cut off from itself.
+- Every stair connects its two landings with a player's clearance, inside its own shaft.
+- Every doorway has a threshold you can stand on; every window is glazed across its aperture.
+- Every occupied top-storey column has something over it — a building with a hole in its roof is not finished.
+- Nowhere a player can stand is dark: block light, conservatively, with no daylight counted.
+
+It is a model, not the game: a conservative box, no jumping, no skylight. It will not certify that Minecraft
+agrees with it. What it will do is fail loudly when something is unbuildable, which is why the studio shows
+a **walkable** score beside navigability and composition.
+
+Three passes exist to answer it. `lib/building-repairs.ts` repairs the envelope — roofs that intrude into
+rooms, walls a later range drove through an earlier one's interior, ceilings, the knee wall under a deep eave,
+a missing foundation course — and then re-opens every declared portal through its own reveal, with a threshold
+you walk across and a step down to the ground outside. `lib/interior-stairs.ts` designs each flight as a
+real assembly — a switchback where the shaft allows one, otherwise a straight run — with landings, sloping
+strings and balustrades, cuts its well, and builds it. `lib/interior-layout.ts` reserves the actual paths
+between doors, landings and each room's usable middle **before** any furniture is placed, so a wardrobe can
+never end up across a route. Only then does the furnishing run, and last of all
+`lib/interior-lighting.ts` hangs lanterns on chains from real overhead blocks, measures what is still dark,
+and hangs more until nothing is.
+
+Across 144 settings — every family, four footprints, one to five storeys — every building passes: every room
+walkable from the door, every stair connected, every portal clear, every aperture glazed, no hole in any
+roof, and nothing pitch dark. Compiling and auditing the largest of them takes about three seconds.
 
 ## Choosing between the compositions a seed made
 

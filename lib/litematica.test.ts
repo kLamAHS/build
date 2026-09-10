@@ -116,12 +116,13 @@ void test('the whole building is architecture, not a massing model',()=>{
     {...DEFAULT_SETTINGS,kind:'house' as const,family:'hall-house' as const,size:128,floors:2,seed:'DRESS'}]){
     const plan=generatePlan(settings),model=buildDetailedModel(plan),s=wholeBuilding(plan,model.grid);
     const tag=`${settings.kind}/${settings.family}`,o=s.origin!;
-    // Nothing the plan built is lost in the compilation, save the blocked-out roofs and the fitting
-    // envelopes it replaces with real ones.
+    // Nothing the plan built is lost in the compilation, save the blocked-out roofs, the fitting envelopes
+    // and the massing glazing it replaces with real ones — and whatever a declared repair took out.
     const structure=voxelize(plan);
+    const declared=model.repairs.filter(r=>['foreign-wall-in-room','roof-in-room','fitting-replacement','orphan-glazing'].includes(r.kind)).reduce((n,r)=>n+r.cells,0);
     let lost=0;
-    structure.forEach((x,y,z)=>{if(!['roof','furniture'].includes(structure.kindAt(x,y,z))&&!s.cells[cellIndex(s.size,x-o.x,y-o.y,z-o.z)])lost++;});
-    assert.equal(lost,0,`${tag}: ${lost} blocks of the plan are missing from the build`);
+    structure.forEach((x,y,z)=>{if(!['roof','furniture','glass'].includes(structure.kindAt(x,y,z))&&!s.cells[cellIndex(s.size,x-o.x,y-o.y,z-o.z)])lost++;});
+    assert.ok(lost<=declared,`${tag}: ${lost} blocks of the plan are missing but only ${declared} removals were reported`);
     const tally=new Map<string,number>();let placed=0;
     for(const cell of s.cells){if(!cell)continue;placed++;const name=s.palette[cell].name;tally.set(name,(tally.get(name)??0)+1);}
     const share=(test:RegExp)=>[...tally].filter(([n])=>test.test(n)).reduce((t,[,n])=>t+n,0)/placed;

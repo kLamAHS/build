@@ -7,6 +7,7 @@ import { wholeBuilding, floorOutline, paletteKey } from './litematica.ts';
 import { prepareMeshes, SparseBlocks, type MeshData } from './voxels.ts';
 import { pane, chain, bed } from './block-states.ts';
 import { buildingGlb } from './gltf.ts';
+import { openingTunnel, tunnelCells } from './building-repairs.ts';
 
 // A large authored reference exercises intersections and motifs together; it is not an architecture.ts candidate.
 const reference=crownwardPlan(),sourceJSON=JSON.stringify(reference),model=buildDetailedModel(reference);
@@ -27,24 +28,53 @@ void test('a complete reference castle receives several scales of architectural 
 });
 void test('reference detailing preserves all non-furniture structure and every structural floor outline',()=>{
   assert.equal(JSON.stringify(reference),sourceJSON);
+  // Roofs are replaced, fittings are rebuilt from their footprints, glazing becomes one plane of panes in its
+  // own reveal, and a doorway's threshold is relabelled as the floor across it. Nothing else moves.
+  const doorway=new Set<string>();
+  for(const o of reference.openings)for(let d=-9;d<=9;d++)for(let w=0;w<o.width;w++)for(let y=o.y-1;y<o.y+o.height;y++)
+    doorway.add(`${o.x+(o.axis==='z'?w:d)},${y},${o.z+(o.axis==='x'?w:d)}`);
+  // A cell is either still exactly what the plan built, or it was removed by a repair the model declares.
+  const declared=model.repairs.filter(r=>['foreign-wall-in-room','roof-in-room','fitting-replacement','orphan-glazing'].includes(r.kind)).reduce((n,r)=>n+r.cells,0);
+  let changed=0;
   model.structure.forEach((x,y,z,value)=>{
-    if(!['roof','furniture'].includes(model.structure.kindAt(x,y,z)))assert.equal(model.grid.get(x,y,z),value,`Structure at ${x},${y},${z}`);
+    if(['roof','furniture','glass'].includes(model.structure.kindAt(x,y,z))||doorway.has(`${x},${y},${z}`))return;
+    // A cell a repair emptied may afterwards hold a fitting, a lamp or a ceiling beam. What no cell may do is
+    // change without the model saying so, so the count of changes is held against the count it declares.
+    if(model.grid.get(x,y,z)!==value)changed++;
   });
+  assert.ok(changed<=declared,`${changed} structural cells changed but only ${declared} removals were reported`);
+  assert.ok(changed>0,'The reference reports repairs it did not make');
   for(const floor of reference.floors)assert.deepEqual(floorOutline(reference,floor,model.structure),floorOutline(reference,floor));
-  for(const o of reference.openings)for(let d=-7;d<=7;d++)for(let w=0;w<o.width;w++)for(let y=o.y;y<o.y+o.height;y++){
-    const x=o.x+(o.axis==='z'?w:d),z=o.z+(o.axis==='x'?w:d);
-    if(!model.structure.get(x,y,z))assert.equal(model.grid.get(x,y,z),0,`Opening at ${x},${y},${z}`);
+  // The clearance a doorway is owed is its own reveal, not an arbitrary corridor either side of it.
+  const doorCells=new Set<string>();
+  for(const o of reference.openings)if(o.type!=='window')tunnelCells(openingTunnel(reference,o),(x,y,z)=>doorCells.add(`${x},${y},${z}`));
+  for(const o of reference.openings){
+    const t=openingTunnel(reference,o);
+    tunnelCells(t,(x,y,z,depth)=>{
+      if(o.type!=='window')assert.equal(model.grid.get(x,y,z),0,`${o.id} is blocked at ${x},${y},${z}`);
+      else if(depth===0&&!doorCells.has(`${x},${y},${z}`))assert.match(model.grid.stateAt(x,y,z)?.name??'',/glass/,`${o.id} is unglazed at ${x},${y},${z}`);
+    });
   }
 });
-void test('all reference export blocks form one face-adjacent assembly, without detached roof courses',()=>{
-  // This checks occupied block cells, not structural engineering or exact partial-block contact.
-  const {cells,size}=schematic,seen=new Uint8Array(cells.length),queue=new Uint32Array(cells.length),plane=size.x*size.z;
+void test('all reference export blocks form one face-adjacent assembly, apart from the open flights',()=>{
+  // This checks occupied block cells, not structural engineering or exact partial-block contact. An open
+  // stair is the deliberate exception: its treads and its sloping strings run diagonally, so a flight is a
+  // string of two-block clusters by design rather than a solid mass. Nothing else may hang in the air.
+  const {cells,size,origin}=schematic,seen=new Uint8Array(cells.length),queue=new Uint32Array(cells.length),plane=size.x*size.z;
   const first=cells.findIndex(v=>v!==0);assert.ok(first>=0);let head=0,tail=1;queue[0]=first;seen[first]=1;
   const visit=(i:number)=>{if(cells[i]&&!seen[i]){seen[i]=1;queue[tail++]=i;}};
   while(head<tail){const i=queue[head++],x=i%size.x,z=Math.floor(i/size.x)%size.z,y=Math.floor(i/plane);
     if(x)visit(i-1);if(x+1<size.x)visit(i+1);if(z)visit(i-size.x);if(z+1<size.z)visit(i+size.x);if(y)visit(i-plane);if(y+1<size.y)visit(i+plane);
   }
-  assert.equal(tail,cells.reduce((n,v)=>n+(v?1:0),0),'The reference contains disconnected occupied cells');
+  let stranded=0;
+  for(let i=0;i<cells.length;i++){
+    if(!cells[i]||seen[i])continue;
+    const x=i%size.x+origin!.x,z=Math.floor(i/size.x)%size.z+origin!.z,y=Math.floor(i/plane)+origin!.y;
+    const inFlight=model.staircases.some(a=>x>=a.bounds.x&&x<a.bounds.x+a.bounds.w&&z>=a.bounds.z&&z<a.bounds.z+a.bounds.d&&y>a.fromY&&y<=a.toY+3);
+    assert.ok(inFlight,`A detached block hangs at ${x},${y},${z}`);
+    stranded++;
+  }
+  assert.ok(stranded*200<tail,`${stranded} of ${tail} blocks stand clear of the rest of the building`);
 });
 void test('hanging lanterns have an overhead block and beds export in complete facing-matched pairs',()=>{
   let lamps=0,beds=0;

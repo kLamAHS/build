@@ -17,9 +17,11 @@ self.onmessage=(event:MessageEvent<{type:'generate'|'layer';id:number;settings?:
       const model=buildDetailedModel(result.plan);grid=model.grid;
       const plan={...result.plan,minY:model.minY,maxY:model.maxY};
       const meshes=prepareMeshes(grid),stats={...grid.stats(),milliseconds:Math.round(performance.now()-start),triangles:meshes.reduce((n,m)=>n+m.indices.length/3,0)};
+      // What the finished blocks are, rather than what the plan intended: whether a player can walk it.
+      const audit={valid:model.audit.valid,issues:model.audit.issues,walking:model.audit.walking,lighting:model.audit.lighting,stairs:model.audit.stairs.length,repairs:model.repairs.length};
       // Floor drawings stay structural. The block-layer view uses the final, exportable architectural model.
       const floorLayers=Object.fromEntries(plan.floors.map(f=>[f.elevation,model.structure.layer(f.elevation+2)]));
-      self.postMessage({type:'ready',id:message.id,plan,alternatives:result.alternatives,meshes,stats,floorLayers},{transfer:meshes.flatMap(m=>[m.positions.buffer,m.normals.buffer,m.indices.buffer])});
+      self.postMessage({type:'ready',id:message.id,plan,alternatives:result.alternatives,meshes,stats,floorLayers,audit},{transfer:meshes.flatMap(m=>[m.positions.buffer,m.normals.buffer,m.indices.buffer])});
     }else if(grid&&message.id===currentId){
       self.postMessage({type:'layer',id:message.id,requestId:message.requestId,layer:grid.layer(message.y!),previous:grid.layer(message.y!-1)});
     }

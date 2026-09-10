@@ -11,6 +11,8 @@ export type BlockState = {
   resolution?: number;
   /** Occupancy at `resolution` subdivisions per axis. Undefined means a full cube. */
   occupancy?: Uint8Array;
+  /** The exact boxes the occupancy was rasterised from, for collision rather than for drawing. */
+  boxes?: readonly StateBox[];
 };
 
 // All states used by this compiler exist in Java 1.16.5 (the writer's existing data version).
@@ -42,6 +44,7 @@ Object.assign(COLORS,{
   lantern:'#eac27b', chain:'#626766', water:'#628e95', bookshelf:'#826948',
   barrel:'#8d6c46', crafting_table:'#907650', furnace:'#737d7b', red_bed:'#843c3b',
   campfire:'#b88549', blast_furnace:'#6d7370', anvil:'#505855', brewing_stand:'#776c4b', enchanting_table:'#514958', lectern:'#98754b',
+  dark_oak_stairs:'#6d5944', brick_stairs:'#96725c', spruce_trapdoor:'#7a5c39', flower_pot:'#8d5a42',
 });
 const cache = new Map<string, BlockState>();
 export function stateKey(name: string, properties: Readonly<Record<string, string>> = {}): string {
@@ -77,7 +80,7 @@ function define(name: string, properties: Record<string, string> = {}, boxes?: r
   if (!value) {
     value = { key, name: key.split('[')[0], properties: Object.freeze({ ...properties }),
       color: COLORS[name.replace('minecraft:', '')] ?? '#96988e',
-      ...(boxes ? { occupancy: occupied(boxes, resolution), resolution } : {}), ...(emissive ? {emissive} : {}) };
+      ...(boxes ? { occupancy: occupied(boxes, resolution), resolution, boxes } : {}), ...(emissive ? {emissive} : {}) };
     cache.set(key, value);
   }
   return value;
@@ -127,6 +130,17 @@ export const leaves=()=>define('oak_leaves',{distance:'1',persistent:'true'});
 export const carpet=()=>define('red_carpet',{},[[0,0,0,1,.0625,1]],16);
 export function bed(facing:Facing,part:'head'|'foot') {return define('red_bed',{facing,part,occupied:'false'},[[0,0,0,1,.5625,1]],16);}
 export const barrel=()=>define('barrel',{facing:'up',open:'false'});
+
+/**
+ * A trapdoor: a table top when it is closed at the top of its cell, a headboard or a shutter when it is open
+ * against one face. Three sixteenths thick either way, which is why it is not a slab.
+ */
+export function trapdoor(name='spruce_trapdoor',facing:Facing='north',half:Half='top',open=false):BlockState {
+  const box:StateBox=open?(facing==='north'?[0,0,0,1,1,.1875]:facing==='south'?[0,0,.8125,1,1,.1875]
+    :facing==='west'?[0,0,0,.1875,1,1]:[.8125,0,0,.1875,1,1]):half==='top'?[0,.8125,0,1,.1875,1]:[0,0,0,1,.1875,1];
+  return define(name,{facing,half,open:String(open),powered:'false',waterlogged:'false'},[box],16);
+}
+export const flowerpot=()=>define('flower_pot',{},[[.3125,0,.3125,.375,.375,.375]],16);
 
 /** Decorative/stateful fitting models. Texture-only details remain the game client's responsibility. */
 export function campfire(facing:Facing):BlockState {

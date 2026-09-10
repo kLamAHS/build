@@ -1,5 +1,6 @@
 import { MATERIALS, type BlockBox, type BlockKind, type Plan } from './model.ts';
 import type { BlockState } from './block-states.ts';
+import type { BuiltAudit } from './built-audit.ts';
 
 export const CHUNK_SIZE=16;
 const KINDS:BlockKind[]=['air','wall','floor','roof','stair','support','furniture','ground','glass','chimney'];
@@ -14,17 +15,33 @@ export class SparseBlocks {
   chunks=new Map<string,Uint16Array>();
   states=new Map<string,BlockState>();
   detailVersion?:number;
+  /** Bumped by every write, so the built audit can tell a cached verdict from a stale one. */
+  revision=0;
+  buildAudit?:BuiltAudit;
+  auditedRevision?:number;
+  auditKey?:string;
   bounds:Plan['bounds'];
+  // One-entry chunk cache. Reading a cell is the innermost operation of meshing, lighting and the walking
+  // audit, and a neighbourhood scan asks about the same chunk sixteen times; building its key each time is
+  // most of the cost. Any write, or a new chunk, drops the cache.
+  private nearX=NaN;private nearY=NaN;private nearZ=NaN;private nearAt=-1;private nearSize=-1;private near?:Uint16Array;
   constructor(bounds:Plan['bounds']) {this.bounds={...bounds};}
-  get(x:number,y:number,z:number){const cx=Math.floor(x/16),cy=Math.floor(y/16),cz=Math.floor(z/16);return this.chunks.get(key(cx,cy,cz))?.[index(x-cx*16,y-cy*16,z-cz*16)]||0;}
+  private chunkAt(cx:number,cy:number,cz:number){
+    if(cx!==this.nearX||cy!==this.nearY||cz!==this.nearZ||this.nearAt!==this.revision||this.nearSize!==this.chunks.size){
+      this.nearX=cx;this.nearY=cy;this.nearZ=cz;this.nearAt=this.revision;this.nearSize=this.chunks.size;this.near=this.chunks.get(key(cx,cy,cz));
+    }
+    return this.near;
+  }
+  get(x:number,y:number,z:number){const cx=Math.floor(x/16),cy=Math.floor(y/16),cz=Math.floor(z/16);return this.chunkAt(cx,cy,cz)?.[index(x-cx*16,y-cy*16,z-cz*16)]||0;}
   material(x:number,y:number,z:number){return this.get(x,y,z)&15;}
   kindAt(x:number,y:number,z:number):BlockKind{const v=this.get(x,y,z);return v?KINDS[(v>>4)&15]:'air';}
   stateAt(x:number,y:number,z:number){return this.states.get(key(x,y,z));}
   setState(x:number,y:number,z:number,state:BlockState){
     if(!this.get(x,y,z))throw new Error('A block state must belong to an occupied cell.');
-    this.states.set(key(x,y,z),state);
+    this.revision++;this.states.set(key(x,y,z),state);
   }
   apply(b:BlockBox){
+    this.revision++;
     const value=b.material?((b.kind==='roof'?((b.ownerFloor??Math.floor(b.y/6))+8)<<8:0)|(KINDS.indexOf(b.kind)<<4)|b.material):0;
     // An overwrite, including air, must never leave an obsolete stair/slab behind.
     if(this.states.size)for(let y=b.y;y<b.y+b.h;y++)for(let z=b.z;z<b.z+b.d;z++)for(let x=b.x;x<b.x+b.w;x++)this.states.delete(key(x,y,z));
@@ -137,6 +154,20 @@ export function prepareMeshes(grid:SparseBlocks):MeshData[]{
   // Only the six face neighbours are ever consulted, and each is asked about up to 256 times: read each one
   // once per block, into buffers that are reused rather than reallocated for every stair and slab.
   const masks=new Map<number,Int32Array>(),cursor=[0,0,0];
+  // A chain is two sixteenths of a block in a sixteenth-block grid: all but a few of its four thousand
+  // sub-cells are empty. Walk each shape's own occupied span rather than the whole cube it sits in.
+  const spans=new Map<string,number[]>();
+  const spanOf=(state:BlockState)=>{
+    let span=spans.get(state.key);
+    if(!span){
+      const n=state.resolution??4,cells=state.occupancy!,lo=[n,n,n],hi=[-1,-1,-1];
+      for(let y=0;y<n;y++)for(let z=0;z<n;z++)for(let x=0;x<n;x++)if(cells[x+n*(z+n*y)]){
+        const at=[x,y,z];for(let a=0;a<3;a++){lo[a]=Math.min(lo[a],at[a]);hi[a]=Math.max(hi[a],at[a]);}
+      }
+      span=[...lo,...hi];spans.set(state.key,span);
+    }
+    return span;
+  };
   const nearValue=new Int32Array(6),nearStamp=new Int32Array(6).fill(-1),nearState:(BlockState|undefined)[]=[];
   let stamp=0;
   for(const [k,state] of grid.states){
@@ -153,7 +184,8 @@ export function prepareMeshes(grid:SparseBlocks):MeshData[]{
       }
       return slot;
     };
-    const g=byId[group(value,origin[1],state)-1],shape=state.occupancy;
+    const g=byId[group(value,origin[1],state)-1],shape=state.occupancy,span=spanOf(state);
+    if(span[3]<0)continue;
     // Sub-block occupancy is asked millions of times per estate, so nothing in here allocates.
     const occupiedAt=(n:number,x:number,y:number,z:number)=>{
       if(x>=0&&x<n&&y>=0&&y<n&&z>=0&&z<n)
@@ -169,15 +201,16 @@ export function prepareMeshes(grid:SparseBlocks):MeshData[]{
       cursor[0]=cursor[1]=cursor[2]=0;cursor[axis]=sign;
       const n=Math.max(own,nearState[readNear(cursor[0],cursor[1],cursor[2])]?.resolution??4);
       let smallMask=masks.get(n);if(!smallMask){smallMask=new Int32Array(n*n);masks.set(n,smallMask);}
-      const u=(axis+1)%3,v=(axis+2)%3;
-      for(let plane=0;plane<n;plane++){
-        smallMask.fill(0);
-        for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+      const u=(axis+1)%3,v=(axis+2)%3,scale=n/own;
+      const from=(a:number)=>Math.floor(span[a]*scale),to=(a:number)=>Math.floor((span[a+3]+1)*scale)-1;
+      for(let plane=from(axis);plane<=to(axis);plane++){
+        smallMask.fill(0);let hits=0;
+        for(let j=from(v);j<=to(v);j++)for(let i=from(u);i<=to(u);i++){
           cursor[axis]=plane;cursor[u]=i;cursor[v]=j;
           if(!occupiedAt(n,cursor[0],cursor[1],cursor[2]))continue;cursor[axis]+=sign;
-          if(!occupiedAt(n,cursor[0],cursor[1],cursor[2]))smallMask[i+j*n]=1;
+          if(!occupiedAt(n,cursor[0],cursor[1],cursor[2])){smallMask[i+j*n]=1;hits++;}
         }
-        rectangles(smallMask,n,(i,j,w,h)=>{const start=[...origin];start[axis]+=(plane+(sign>0?1:0))/n;start[u]+=i/n;start[v]+=j/n;quad(g,start,axis,sign,w/n,h/n);});
+        if(hits)rectangles(smallMask,n,(i,j,w,h)=>{const start=[...origin];start[axis]+=(plane+(sign>0?1:0))/n;start[u]+=i/n;start[v]+=j/n;quad(g,start,axis,sign,w/n,h/n);});
       }
     }
   }

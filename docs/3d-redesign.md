@@ -32,6 +32,33 @@ npm run showcase:architecture -- ./exports/crownward
 
 The script writes Litematica and GLB files, structural/detailed mesh data, the Plan and a feature report. The included PNGs render this actual geometry, not an image-model concept and not a Minecraft screenshot. They use flat material colors, not Minecraft textures. Some decorative fitting shapes are simplified; their block IDs and properties are preserved for the game to render. Texture-perfect visual parity is not claimed.
 
+## The third pass: a building you can walk through
+
+`buildDetailedModel` now compiles the inside as well as the outside, and finishes by auditing the result.
+After the architectural language has composed roofs, facades and ornament:
+
+- `building-repairs.ts` repairs the envelope (roof cells inside occupied rooms, walls a later range drove
+  through an earlier one's interior, top-storey ceilings, the knee wall under a deep eave, missing foundation
+  courses) and re-opens every declared portal through its own reveal, with a threshold you walk across, a
+  glazed aperture for each light, and a stair apron down to the ground outside an exterior door.
+- `interior-layout.ts` strips the old cuboid fittings, then reserves the actual routes between doors,
+  landings and each room's usable middle before any furniture is placed.
+- `interior-stairs.ts` designs each flight as an assembly — switchback where the shaft allows it, otherwise a
+  straight run — with real landings, sloping strings and balustrades, cuts its well and builds it. The same
+  assemblies drive both the carving and the validation.
+- `architectural-furnishings.ts` rebuilds each fitting at room scale within its existing footprint, drafted
+  whole and placed only if all of it fits, and finishes floors, panelling, ceilings and carpets.
+- `interior-lighting.ts` hangs lanterns on chains from real overhead blocks, measures the block light on
+  every walkable floor sample, and hangs more until nothing is below the design target.
+- `walkability.ts` and `built-audit.ts` then put a 0.6 × 1.8 body into the finished blocks and try to walk:
+  every room reachable from the entry, every stair connecting its landings, every doorway clear, every window
+  glazed, every top-storey column covered, nothing dark. The verdict rides on the model as `audit`, reaches
+  the worker, and is shown in the studio beside navigability and composition.
+
+The model is conservative and deliberately not the game: a box on a half-block lattice, no jumping, block
+light with no daylight. It cannot certify that Minecraft agrees. It can and does fail loudly when a building
+is unbuildable.
+
 ## What changed when this was merged
 
 The package was written against an upstream that predates the first redesign merge, so it was applied by hand rather than by its installer, and three things were carried across it:
@@ -42,6 +69,30 @@ The package was written against an upstream that predates the first redesign mer
 - The lint fixes and typed test helpers the repository already carried were reapplied on top of the package's files.
 
 Panes, per-kind stone sets and a separate plinth pass from the first merge are gone, superseded by this package's glazing, masonry patches and facade base course.
+
+The interior package arrived as seven modules with no installer, written against the reference composition
+rather than against the generator's own output. Hooking it up meant fixing what only the real generator
+shows, all of it in the package's own modules:
+
+- A doorway's threshold is relabelled as the floor you walk across. The mass under a door is part of the
+  wall, and an audit that reads roles rather than blocks saw every internal doorway as a cliff — the whole
+  house came apart into one component per room.
+- A flight goes in the shaft the plan declared. Centring it in the middle of a chamfered tower instead was a
+  fallback for a shaft that does not fit, not the ordinary case, and it drove every cellar stair through a
+  partition wall.
+- Outward is measured from the room a doorway belongs to, not from the yard it opens onto: a court's centre
+  is on the wrong side, and the reveal, threshold and step were being cut backwards into the building.
+- One window's reveal no longer un-glazes another's aperture where two rooms claim the same wall cell, and
+  glass the massing left outside any declared aperture is removed rather than left hanging.
+- Stale fittings are stripped before the openings are reconciled, so a yard well no longer blocks the step
+  outside the only door out of a range.
+- The doorway approach is reserved for two cells past its reveal, and lamps respect that reservation; a lamp
+  hangs one course below a ceiling rather than two, so a four-block gabled storey can have one at all; a lamp
+  hangs from anything solid across its underside; and a pitch-dark spot always gets its own lamp, because
+  straight-line distance to another lamp says nothing about the wall between them.
+- `airCuts` indexes a plan's declared vents by column, `SparseBlocks.get` caches its chunk, the audit reads
+  its standing positions out of the graph's own column index, and the shaped-block mesher walks each shape's
+  occupied span. Together those took the largest building from 9.9 s to compile, audit and mesh down to 3.6 s.
 
 ## Validation
 
@@ -58,11 +109,12 @@ What was actually run, in this repository, against the real generator:
 
 | Check | Result |
 |---|---|
-| `npm run test:architecture` | 21 focused + 12 integration tests pass |
-| `npm test` | 79 tests pass |
+| `npm run test:architecture` | 21 focused + 7 walkability + 12 integration tests pass |
+| `npm test` | 86 tests pass |
 | `npm run typecheck`, `npm run build` | clean |
 | `npm run lint` | 32 errors, all pre-existing |
-| 360-setting compile sweep (3 kinds × every family × 6 sizes × 5 storey counts) | 0 failures; compile mean 305 ms, slowest 805 ms; mesh mean 1164 ms, slowest 2721 ms; 73 distinct block states, every one a well-formed vanilla id that exists in 1.16.5 |
+| 360-setting compile sweep | 0 failures; every block state a well-formed vanilla id that exists in 1.16.5 |
+| 144-setting built audit (every family × 4 footprints × 3 storey counts) | 0 buildings with an error: every room walkable from the door, every stair connected, every portal clear, every aperture glazed, no uncovered column, nothing dark. Slowest compile-and-audit 3.3 s |
 | `node lib/regression-batch.ts 200` | 200/200 validity, 200/200 search success — the generator is untouched by this change |
 | Cross-process determinism | the NBT of twelve families hashes identically in separate processes |
 

@@ -41,16 +41,31 @@ void test('compilation leaves the source plan, structural cells and floor outlin
   const model=buildDetailedModel(plan);
   assert.equal(JSON.stringify(plan),json);assert.deepEqual(snapshot(model.structure),snapshot(original));
   assert.deepEqual(floorOutline(plan,plan.floors[0],model.structure),outline);
-  original.forEach((x,y,z,value)=>{if(original.kindAt(x,y,z)!=='roof')assert.equal(model.grid.get(x,y,z),value,`Structural cell changed at ${x},${y},${z}`);});
+  // A doorway's own threshold is relabelled as the floor you walk across, and its reveal is re-cut, but no
+  // other structural cell moves. Fittings are rebuilt from their footprints rather than kept as cuboids.
+  const doorway=new Set<string>();
+  for(const o of plan.openings)for(let d=-9;d<=9;d++)for(let w=0;w<o.width;w++)for(let y=o.y-1;y<o.y+o.height;y++)
+    doorway.add(`${o.x+(o.axis==='z'?w:d)},${y},${o.z+(o.axis==='x'?w:d)}`);
+  original.forEach((x,y,z,value)=>{
+    if(['roof','furniture'].includes(original.kindAt(x,y,z))||doorway.has(`${x},${y},${z}`))return;
+    assert.equal(model.grid.get(x,y,z),value,`Structural cell changed at ${x},${y},${z}`);
+  });
 });
 void test('doors, glass, hall interior, entry approach and explicit louver remain clear',()=>{
   const plan=architectureFixture(),{grid,structure}=buildDetailedModel(plan);
   for(let x=18;x<21;x++)for(let z=-10;z<=2;z++)for(let y=1;y<5;y++)assert.equal(grid.get(x,y,z),structure.get(x,y,z));
-  for(let x=6;x<8;x++)for(let z=-2;z<=0;z++)for(let y=2;y<6;y++)assert.equal(grid.kindAt(x,y,z),'glass');
+  // The light is one plane of glazing in a recessed reveal, not three courses of solid glass block.
+  for(let x=6;x<8;x++)for(let y=2;y<6;y++){
+    assert.equal(grid.stateAt(x,y,0)?.name,'minecraft:gray_stained_glass_pane',`Unglazed aperture at ${x},${y},0`);
+    for(const z of [-2,-1])assert.equal(grid.get(x,y,z),0,`The reveal at ${x},${y},${z} is still bricked up`);
+  }
+  // The inside of a room belongs to its fittings, its lights and its ceiling. No facade ornament, no roof and
+  // no masonry may reach into it, and nothing but a fitting may stand in the head of someone walking through.
   for(let x=1;x<28;x++)for(let z=1;z<16;z++)for(let y=1;y<12;y++){
     if(!grid.get(x,y,z))continue;
-    assert.ok(y>=4,'A light intrudes into standing headroom');
-    assert.ok(['minecraft:lantern','minecraft:chain'].includes(grid.stateAt(x,y,z)?.name??''),'Architectural detail intrudes into the hall');
+    const kind=grid.kindAt(x,y,z);
+    assert.ok(kind==='furniture'||kind==='support',`${kind} intrudes into the hall at ${x},${y},${z}`);
+    assert.ok(y>=4||kind==='furniture',`Ceiling structure hangs into standing headroom at ${x},${y},${z}`);
   }
   for(let x=12;x<15;x++)for(let z=7;z<10;z++)for(let y=12;y<34;y++)assert.equal(grid.get(x,y,z),0,`Louver closed at ${x},${y},${z}`);
 });
@@ -64,11 +79,18 @@ void test('stair treads retain their rise and direction without blocking the thr
     plan.blocks.push({x:37,y:j+1,z:3+j,w:2,h:1,d:1,material:2,kind:'stair',componentId:'keep'});
     plan.blocks.push({x:37,y:j+2,z:3+j,w:2,h:3,d:1,material:0,kind:'air',componentId:'keep'});
   }
-  const {grid}=buildDetailedModel(plan);
-  for(let j=0;j<6;j++)for(let x=37;x<=38;x++){
-    assert.equal(grid.stateAt(x,j+1,3+j)?.properties.facing,'south');
-    for(let y=j+2;y<j+5;y++)assert.equal(grid.get(x,y,3+j),0);
+  const model=buildDetailedModel(plan),built=model.staircases.find(a=>a.id==='test-stair')!;
+  // The flight is rebuilt as a real assembly with landings, strings and rails. What has to hold is that every
+  // tread is a stair facing the way it climbs, and that nothing stands in the head of anyone climbing it.
+  assert.equal(built.style,'switchback');
+  const treads=built.pieces.filter(p=>p.kind==='stair');
+  assert.ok(treads.length>=12,`only ${treads.length} treads`);
+  for(const p of treads){
+    assert.match(model.grid.stateAt(p.x,p.y,p.z)?.name??'',/stairs$/);
+    assert.ok(['north','south'].includes(model.grid.stateAt(p.x,p.y,p.z)?.properties.facing??''));
+    for(let y=p.y+1;y<p.y+3;y++)assert.equal(model.grid.get(p.x,y,p.z),0,`Headroom closed above a tread at ${p.x},${y},${p.z}`);
   }
+  assert.ok(model.audit.stairs.find(s=>s.id==='test-stair')?.connected,'The rebuilt flight does not connect its landings');
 });
 void test('a chamfered tower no longer has floating square merlons at its bounding-box corners',()=>{
   const plan=architectureFixture(),{grid}=buildDetailedModel(plan),c=plan.components[2];
