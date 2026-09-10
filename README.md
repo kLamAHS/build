@@ -39,7 +39,9 @@ toolbar or by passing `diagnostics` to `PlanDrawing`.
 
 - **Volumes** — every range outlined and labelled with its kind, its proportions, its storeys, the build it
   belongs to and how many volumes it stands from the hall, shaded by age, with a line for each wall two of
-  them share. This is the composition stage: a straggling arm shows here as a chain of high numbers.
+  them share; and on the ground floor, each motif's two ends and every port it takes, marked P, S or R for
+  public, service and private. This is the composition stage: a straggling arm shows here as a chain of high
+  numbers, and a hall whose service door has crept up to the dais shows as an S in the high end.
 - **Circulation** — every doorway drawn as a line between the rooms it joins, every room as a dot carrying
   the number of doors from the entrance, circulation and destinations coloured apart, and any room a
   household is forced to cross ringed in red.
@@ -163,6 +165,54 @@ The hole a stair comes up through is a void, and is drawn as one: its own perime
 annotation, rather than an unexplained grey gap in the boards. The audit rejects a plan where a door opens
 onto one — the route test would have caught it as a missing floor, but a household walking off a landing into
 the stair well deserves to be told what it is.
+
+## Motifs, and what makes a hall a hall
+
+A hall used to be a room labelled `hall`: as wide as it was long, with a dais at one end because that was
+where the code put one. Nothing said what a hall *is*, so nothing could tell when it had stopped being one.
+
+`Plan.motifs` records an arrangement whose ends are not interchangeable, together with the relationships that
+make it that arrangement — and the audit then checks them rather than assuming them.
+
+**The hall.** Its long axis, its high end and its serving end, and its ports: the public way in, the service
+doors, the private door to the household's own side. The audit rejects a hall shorter than 1.35:1 on its long
+axis, a hall whose two ends are in the same place, a dais outside the high end, or screens outside the serving
+end. Halls were widened and shortened to fit — a median of 1.32:1, and 129 of 144 under 1.6 — and are now
+median **1.89:1**, with 3 of 144 under 1.6. Making them long meant putting the wings at their ends: the solar
+wing now stands at the high end and the kitchen range at the serving end, rather than both centred on the
+flanks, which is what makes a screens passage a threshold instead of a door halfway along a wall.
+
+**The gate.** Its outer threshold, its passage and its inner threshold, with the guard rooms beside it.
+
+**Hall variants.** §6.1 asks for the motif to have forms, not one drawing. The hearth strategy is the first:
+an **open hearth** stands in the middle of the floor and vents through a louver built over it — a shaft through
+the roof with a lantern on posts — and is what a hall retained from an earlier build still has; a **wall
+fireplace** stands against the flank and takes the stack, and the stack over the household's own fire is now
+placed before any service range's. With the high-end bay from the articulation pass, that gives four forms:
+*open-hearth*, *open-hearth-with-bay*, *wall-fireplace*, *wall-fireplace-with-bay*, spread roughly 40/60/25/20
+across a 144-plan slice.
+
+**Dinner does not come past the dais.** A door between the hall and a service or workshop range must be in the
+serving half of the long axis. That took service doors at the high end from 63 in 229 to 3 in 157. Where the
+door grammar is forced into one anyway to keep a range reachable, it is counted as a compromise and costs the
+candidate its rank, the same as any other improper door.
+
+**A yard is a way through.** An open space the household can enter only one way is a gap with a gate on it,
+not a court, and the audit rejects it.
+
+## New seeds vary in architecture
+
+The **courtyard castle** took every dimension straight off the site budget, so sixty seeds raised the same
+castle sixty times over: **one distinct massing in sixty seeds**. The court's proportion, the depth of each
+range, how tall the gate stands and whether the corners are towered are now the seed's to choose — a castle
+may have no corner towers, a pair, or all four, each set against the end of a flanking range so that a tower
+is a room of the household rather than an ornament in the grass. What stays fixed is the type: four ranges
+round a yard, the hall at its head, the way in opposite the hall.
+
+Sixty seeds now give **seventeen** distinct massings, with the commonest ten. Every other family already
+varied and still does: 54 to 60 distinct massings in 60 seeds, commonest 2 to 4. A massing here is what a
+reader would see with the labels off — the kinds of volume, their proportions and their heights — and it is
+measured so that a mirror, a rotation or a rename counts for nothing.
 
 ## Vertical composition
 
@@ -333,6 +383,10 @@ The court is a room of the plan rather than a border drawn round it, so ranges a
 and the approach reads as a sequence: **gate passage, court, screens passage, hall.** Nothing is discovered
 by packing rooms and drawing a wall round the result. Below 128 blocks there is not enough ground for a
 quadrangle and the composition falls back to the hall-and-wings massing.
+
+The type is fixed; the castle is not. See *New seeds vary in architecture* above for what the seed chooses
+here — the court's proportion, each range's depth, the height of the gate, and whether the corners carry
+towers.
 
 ## The household, and the site it stands on
 

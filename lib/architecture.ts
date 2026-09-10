@@ -1,4 +1,4 @@
-import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Reservation, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Suite, type Court, type GenerationResult, type BlockBox } from './model.ts';
+import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Reservation, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Motif, type MotifPort, type Suite, type Court, type GenerationResult, type BlockBox } from './model.ts';
 import { isCirculation, navigationReport, articulationPoints, HALL_END, IMPROPER_DOORS, ROOM_PRIVACY } from './navigation.ts';
 import { auditArchitecture } from './architectural-audit.ts';
 import { bayLines, compositionReport } from './composition.ts';
@@ -131,7 +131,10 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   /** Begin a later build, unless this composition was raised in a single campaign. */
   const build=(n:number)=>{phase=unified?1:n;};
   const small=s.size<80, organic=s.organic/100;
-  const hallW=small?16:ri(20,26),hallD=small?22:ri(32,40);
+  // A hall is a long room, and its length is what tells you which end of it you are at. A hall nearly as
+  // wide as it is long has no ends to tell apart: the dais stops being a destination and the screens stop
+  // being a threshold, and what is left is a big square room with tables in it.
+  const hallW=small?14:ri(16,20),hallD=small?28:Math.round(hallW*1.9)+ri(2,10);
   function add(kind:ComponentKind,name:string,bounds:Rect,storeys:number,parent?:BuildingComponent,roof?:BuildingComponent['roof']) {
     if(components.some(c=>intersects(c.bounds,bounds)))return undefined;
     const chamfer=kind==='tower'?Math.min(4,Math.floor(bounds.w/5)):0;
@@ -150,20 +153,40 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   let gatehouse:BuildingComponent|undefined;
   const quadrangle=family==='courtyard-castle'&&s.size>=128;
   if(quadrangle){
-    const span=(share:number,low:number,high:number)=>Math.max(low,Math.min(high,Math.round(s.size*share)));
-    const courtW=span(.22,22,56),courtD=span(.24,22,60);
+    // A quadrangle is a type, not a drawing. Every dimension used to come straight off the site budget, so
+    // two seeds at one size raised the same castle twice over. The proportion of the court, the depth of
+    // each range, how tall the gate stands and whether the corners are towered are the seed's to choose;
+    // what stays fixed is the type itself — four ranges round a yard, the hall at its head, the way in
+    // opposite the hall.
+    const stretch=()=>(rng()-.5)*.36;
+    const span=(share:number,low:number,high:number,vary=0)=>Math.max(low,Math.min(high,Math.round(s.size*share*(1+vary))));
+    const courtW=span(.19,20,42,stretch()),courtD=span(.24,22,60,stretch());
     // A court range is one rank of rooms deep behind its walk. Anything wider stops fronting the yard and
     // starts being a block with a corridor in it, so the budget goes into the court, not into the wing.
-    const hallD=Math.max(courtW+6,span(.26,26,72)),wing=Math.min(span(.16,16,26),BAND+1+RANK_DEEP),gateD=span(.13,14,30);
+    const cap=BAND+1+RANK_DEEP;
+    const hallD=Math.max(Math.round(courtW*1.7)+6,span(.26,26,80,stretch()));
+    const westW=Math.min(span(.16,16,26,stretch()),cap),eastW=Math.min(span(.16,16,26,stretch()),cap),gateD=span(.13,14,30,stretch());
+    const flankD=hallD+courtD+gateD;
     // Stage B: the court and the way in come first and everything else is set against them.
     add('court','Inner court',{x:0,z:0,w:courtW,d:courtD},1);
     // Stage C: the hall closes the head of the court, its screens end opening onto the yard.
     hall=add('hall','Great hall',{x:0,z:-hallD,w:courtW,d:hallD},1)!;
-    domestic=add('domestic','Solar wing',{x:-wing,z:-hallD,w:wing,d:hallD+courtD+gateD},s.floors);
-    service=add('service','Kitchen range',{x:courtW,z:-hallD,w:wing,d:hallD+courtD+gateD},Math.min(2,s.floors));
-    gatehouse=add('gatehouse','Gatehouse',{x:0,z:courtD,w:courtW,d:gateD},Math.min(2,s.floors));
+    domestic=add('domestic','Solar wing',{x:-westW,z:-hallD,w:westW,d:flankD},s.floors);
+    service=add('service','Kitchen range',{x:courtW,z:-hallD,w:eastW,d:flankD},Math.min(2,s.floors));
+    gatehouse=add('gatehouse','Gatehouse',{x:0,z:courtD,w:courtW,d:gateD},Math.min(s.floors,ri(1,3)));
+    // Corner towers are what tell a quadrangle apart from a courtyard house, and a castle may have none,
+    // a pair on the gate front, or all four. Each is set against the end of a flanking range it can share
+    // a wall with, so a tower is a room of the household rather than an ornament stood off in the grass.
+    const turret=ri(14,18),corners=rng()<.55?(rng()<.5?2:4):0;
+    const spots:[string,Rect][]=[
+      ['South-west tower',{x:-westW-turret,z:courtD+gateD-turret,w:turret,d:turret}],
+      ['South-east tower',{x:courtW+eastW,z:courtD+gateD-turret,w:turret,d:turret}],
+      ['North-west tower',{x:-westW-turret,z:-hallD,w:turret,d:turret}],
+      ['North-east tower',{x:courtW+eastW,z:-hallD,w:turret,d:turret}],
+    ];
+    for(const [name,r] of spots.slice(0,corners))add('tower',name,r,Math.max(2,s.floors),domestic);
   }else if(family==='hall-house'){
-    hall=add('hall','Hearth hall',{x:0,z:0,w:small?18:22,d:hallD},1)!;
+    hall=add('hall','Hearth hall',{x:0,z:0,w:hallW,d:hallD},1)!;
     domestic=attach(hall,'domestic','Solar end','n',small?18:24,32,s.floors,0)!;
     service=attach(hall,'service','Service end','s',small?14:20,small?14:20,1,0);
   }else if(family==='merchant-house'){
@@ -177,9 +200,12 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     if(!small)attach(domestic,'tower','Watch tower','n',22,30,Math.max(1,s.floors-1),-7);
   }else{
     hall=add('hall',s.kind==='house'?'Hearth hall':'Great hall',{x:0,z:0,w:hallW,d:hallD},1)!;
-    const leftD=small?32:ri(34,40),leftW=small?18:ri(22,28);
-    domestic=attach(hall,s.kind==='castle'?'tower':'domestic',s.kind==='castle'?'Great keep':'Solar wing','w',leftW,leftD,s.floors,0)!;
-    service=attach(hall,'service','Kitchen range',small?'n':'e',small?14:ri(20,24),small?14:ri(28,34),Math.min(s.floors,small?1:2),0);
+    const leftD=small?32:ri(34,40),leftW=small?18:ri(22,28),rightD=small?14:ri(28,34);
+    // The private wing stands at the hall's high end and the kitchen range at its serving end. Centring both
+    // on the flanks is what turns a screens passage into a door halfway along a wall: the ends of a hall are
+    // only ends if what they lead to is at them.
+    domestic=attach(hall,s.kind==='castle'?'tower':'domestic',s.kind==='castle'?'Great keep':'Solar wing','w',leftW,leftD,s.floors,-Math.floor((hallD-leftD)/2))!;
+    service=attach(hall,'service','Kitchen range',small?'n':'e',small?14:ri(20,24),rightD,Math.min(s.floors,small?1:2),small?0:Math.floor((hallD-rightD)/2));
     if(['courtyard-manor','palace','double-ward'].includes(family)&&!small){
       attach(domestic,'lodging','West apartments','s',leftW,32,Math.max(1,s.floors-1),0);
       if(service)attach(service,'workshop','East service court','s',service.bounds.w,30,1,0);
@@ -304,7 +330,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
   // what stands is simply the one build there ever was, and it is treated as such.
   if(!components.some(c=>c.phase>0))for(const c of components)c.phase=1;
   // Compact budgets keep the same minimum stair and room sizes; optional ranges are omitted.
-  const p:Plan={schemaVersion:2,generatorVersion:'2.0',name:reference?'Alderhall Manor':`${pick(names)}${pick(['wick','mere','ford','haven'])} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,family,components,rooms:[],floors:[],openings:[],stairs:[],chimneys:[],articulation:[],reservations:[],courts:[],routes:[],blocks:[],walls:[],slabs:[],roofs:[],supports:[],bounds:{x:0,z:0,w:0,d:0},minY:s.cellar?-6:0,maxY:0,width:0,depth:0,totalArea:0,entry:{x:0,z:0},connections:[],suites:[],validation:{valid:true,issues:[]},navigation:{maxDepth:0,meanDepth:0,loops:0,unreachable:[],transits:[],strandedRooms:0,compromises:0,score:0},composition:{volumes:0,reach:0,spread:0,yards:0,hierarchy:0,frontage:0,score:0},signature:''};
+  const p:Plan={schemaVersion:2,generatorVersion:'2.0',name:reference?'Alderhall Manor':`${pick(names)}${pick(['wick','mere','ford','haven'])} ${s.kind==='castle'?'Castle':s.kind==='manor'?'Manor':'House'}`,settings:s,family,components,rooms:[],floors:[],openings:[],stairs:[],chimneys:[],articulation:[],reservations:[],motifs:[],courts:[],routes:[],blocks:[],walls:[],slabs:[],roofs:[],supports:[],bounds:{x:0,z:0,w:0,d:0},minY:s.cellar?-6:0,maxY:0,width:0,depth:0,totalArea:0,entry:{x:0,z:0},connections:[],suites:[],validation:{valid:true,issues:[]},navigation:{maxDepth:0,meanDepth:0,loops:0,unreachable:[],transits:[],strandedRooms:0,compromises:0,score:0},composition:{volumes:0,reach:0,spread:0,yards:0,hierarchy:0,frontage:0,score:0},signature:''};
   function room(c:BuildingComponent,name:string,kind:RoomKind,bounds:Rect,y:number,ceiling=y+6,shape:RoomShape='rect',shapeSide:'n'|'s'|'e'|'w'='e',notch?:Rect,corners?:DaisCorners){
     const envelope=c.kind==='tower'?c.polygon:rectPolygon(componentFootprint(c,y,family));
     const polygon=shape==='rect'?clipPolygon(envelope,bounds):clipPolygon(shapePolygon(bounds,shape,shapeSide,notch,corners),componentFootprint(c,y,family));
@@ -1066,8 +1092,22 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     const lo=along==='z'?b.z:b.x,len=along==='z'?b.d:b.w;
     return e.pos>lo+HALL_END&&e.pos<lo+len-HALL_END-1;
   };
+  // A hall's service doors belong at its serving end. A kitchen door beside the dais puts the household's
+  // dinner through its private end, which is the one thing a screens passage exists to prevent.
+  const serviceAtDais=(e:typeof candidates[number])=>{
+    const hall=e.a.kind==='hall'?e.a:e.b.kind==='hall'?e.b:undefined;
+    if(!hall)return false;
+    const other=hall===e.a?e.b:e.a;
+    if(other.componentId===hall.componentId)return false;
+    const oc=components.find(c=>c.id===other.componentId);
+    if(!oc||(oc.kind!=='service'&&oc.kind!=='workshop'))return false;
+    const b=hall.bounds,along:'x'|'z'=b.d>=b.w?'z':'x';
+    const lo=along==='z'?b.z:b.x,len=along==='z'?b.d:b.w;
+    // The dais stands at the low coordinate of the long axis, so the serving half is the far one.
+    return ((along==='z')===(e.axis==='z')?e.fixed:e.pos)<lo+Math.round(len/2);
+  };
   const improper=(e:typeof candidates[number])=>(IMPROPER_DOORS[e.a.kind]??[]).includes(e.b.kind)||(IMPROPER_DOORS[e.b.kind]??[]).includes(e.a.kind)
-    ||throughHall(e)
+    ||throughHall(e)||serviceAtDais(e)
     ||(chapelRooms.has(e.a.id)&&!chapelRooms.has(e.b.id)&&!isCirculation(e.b))
     ||(chapelRooms.has(e.b.id)&&!chapelRooms.has(e.a.id)&&!isCirculation(e.a));
   const proper=(e:typeof candidates[number])=>open(e)&&!improper(e);
@@ -1242,10 +1282,19 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       const mid=b.x+Math.floor(b.w/2),high=b.z+2,length=Math.max(6,b.d-14);
       addFurniture('dais',b.x+3,high,Math.max(6,b.w-6),3);
       addFurniture('table',mid-Math.floor(Math.max(4,b.w-12)/2),high+1,Math.max(4,b.w-12),1);
-      addFurniture('hearth',mid-1,high+6,2,2,1);
+      // The hall's hearth strategy, and the older of the two arrangements is not the poorer one. An open
+      // hearth stands in the middle of the floor and vents through a louver in the roof, which is what a
+      // hall retained from an earlier build still has; a later hall takes a fireplace against its flank
+      // wall, and that is where its stack rises. Which it is changes the plan, the elevation and the
+      // furniture group, so it is a variant of the motif rather than a detail of it.
+      const openHearth=components.find(o=>o.id===r.componentId)!.phase===0||hash(`${s.seed}:${r.id}:hearth`)%3===0;
+      if(openHearth)addFurniture('hearth',mid-1,high+6,2,2,1);
+      else addFurniture('hearth',b.x+1,high+6,2,Math.min(5,Math.max(2,b.d-high-10)),2);
+      // A flank with no room for a fireplace is a hall with an open hearth, not a hall with no fire.
+      if(!r.furniture.some(f=>f.type==='hearth'))addFurniture('hearth',mid-1,high+6,2,2,1);
       const bench=(x:number)=>{addFurniture('table',x,high+9,2,length);addFurniture('bench',x-1,high+9,1,length);addFurniture('bench',x+2,high+9,1,length);};
       bench(b.x+4);
-      if(b.w>=18)bench(b.x+b.w-6);
+      if(b.w>=16)bench(b.x+b.w-6);
     }
     else if(r.kind==='bedroom'){addFurniture('bed',b.x+2,b.z+2,Math.min(3,b.w-3),Math.min(4,b.d-3));addFurniture('shelf',b.x+b.w-2,b.z+2,1,Math.min(3,b.d-3),2);}
     else if(r.kind==='service'){
@@ -1309,6 +1358,60 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     if(p.courts[1])p.routes.push({id:'ward-route',name:'Inner to outer gate',points:[{x:p.entry.x-1,z:bottom-1},{x:p.entry.x-1,z:p.courts[1].gate.z+2}],width:2});
   }
   buildGeometry(p);
+  // ---- Motifs. An arrangement whose ends are not interchangeable is recorded as one, so that what makes it
+  // that arrangement can be checked rather than assumed. A hall is not a long room with a table in it: it has
+  // a high end and a serving end, and its public, service and private doors belong at the ends they belong
+  // at. A gate is not a wide room: it is an outer threshold, a passage, and an inner threshold. The variant
+  // says which form of the motif this seed raised — two seeds may build the same motif differently, but
+  // neither may build one whose ends have swapped places.
+  const otherRoom=(o:Opening,id:string)=>p.rooms.find(r=>o.roomIds.includes(r.id)&&r.id!==id);
+  const roleOf=(other:Room|undefined,entrance:boolean):MotifPort['role']|undefined=>{
+    if(entrance)return 'public';
+    if(!other)return undefined;
+    const oc=components.find(x=>x.id===other.componentId);
+    if(!oc)return undefined;
+    if(oc.kind==='service'||oc.kind==='workshop')return 'service';
+    if(oc.kind==='domestic'||oc.kind==='tower'||oc.kind==='lodging'||oc.kind==='chapel')return 'private';
+    if(oc.kind==='court'||oc.kind==='gatehouse'||other.kind==='court')return 'public';
+    return undefined;
+  };
+  const motif=(kind:Motif['kind'],variant:string,c:BuildingComponent,rooms:Room[],axis:'x'|'z',high:Rect,low:Rect,reason:string)=>{
+    const ids=new Set(rooms.map(r=>r.id)),ports:MotifPort[]=[];
+    for(const r of rooms)for(const o of p.openings){
+      if(o.type==='window'||!o.roomIds.includes(r.id))continue;
+      const other=otherRoom(o,r.id);
+      if(other&&ids.has(other.id))continue;
+      const role=roleOf(other,o.type==='entrance');
+      if(role)ports.push({role,roomId:r.id,openingId:o.id});
+    }
+    p.motifs.push({id:`m${p.motifs.length}`,kind,variant,componentId:c.id,roomIds:rooms.map(r=>r.id),axis,high,low,ports,reason});
+  };
+  for(const c of components){
+    if(c.kind==='hall'){
+      const rooms=p.rooms.filter(r=>r.componentId===c.id&&r.floorY===0);
+      const body=rooms.find(r=>r.kind==='hall');
+      if(!body)continue;
+      const b=body.bounds,axis=b.d>=b.w?'z':'x';
+      // The high end is where the dais stands; the serving end is the far third, behind the screens.
+      const third=Math.max(4,Math.floor((axis==='z'?b.d:b.w)/3));
+      const high:Rect=axis==='z'?{...b,d:third}:{...b,w:third};
+      const low:Rect=axis==='z'?{x:c.bounds.x,z:c.bounds.z+c.bounds.d-third,w:c.bounds.w,d:third}:{x:c.bounds.x+c.bounds.w-third,z:c.bounds.z,w:third,d:c.bounds.d};
+      const fire=body.furniture.find(f=>f.type==='hearth');
+      const central=fire&&fire.x>b.x+2&&fire.x+fire.w<b.x+b.w-2;
+      const bay=p.articulation.some(a=>(a.role==='bay'||a.role==='oriel')&&a.roomIds.includes(body.id));
+      const variant=`${central?'open-hearth':'wall-fireplace'}${bay?'-with-bay':''}`;
+      motif('hall',variant,c,rooms,axis,high,low,`A hall on its long ${axis} axis: the dais at the high end, the screens and the service doors at the other`);
+    }
+    if(c.kind==='gatehouse'){
+      const rooms=p.rooms.filter(r=>r.componentId===c.id&&r.floorY===0);
+      if(!rooms.length)continue;
+      const b=c.bounds,axis=b.d>=b.w?'z':'x',third=Math.max(2,Math.floor((axis==='z'?b.d:b.w)/3));
+      // The outer threshold is the one the world arrives at; the inner is the one the household keeps.
+      const outer:Rect=axis==='z'?{...b,z:b.z+b.d-third,d:third}:{...b,x:b.x+b.w-third,w:third};
+      const inner:Rect=axis==='z'?{...b,d:third}:{...b,w:third};
+      motif('gate','passage',c,rooms,axis,inner,outer,'A gate passage with an outer threshold, guard rooms beside it and an inner threshold');
+    }
+  }
   // One pass, no spread: a large composition reaches six figures of blocks, and spreading that into an
   // argument list makes whether the plan builds at all depend on the host's stack rather than on the seed.
   let minX=Infinity,minZ=Infinity,maxX=-Infinity,maxZ=-Infinity,lowY=Infinity,highY=-Infinity;
@@ -1718,7 +1821,11 @@ function buildGeometry(p:Plan){
     }
   }
   for(const r of p.rooms)for(const f of r.furniture)box(f,f.y,f.h,f.material,'furniture',r.componentId);
-  for(const c of p.components.filter(c=>c.kind==='service'||c.kind==='hall'||c.kind==='domestic').slice(0,8)){
+  // A hall's fireplace gets its flue before a service range's does: the stack over the household's own fire
+  // is the one that reads on the elevation, and the budget of stacks is not large.
+  const stackable=p.components.filter(c=>c.kind==='service'||c.kind==='hall'||c.kind==='domestic');
+  stackable.sort((a,b)=>(a.kind==='hall'?0:1)-(b.kind==='hall'?0:1));
+  for(const c of stackable.slice(0,8)){
     const b=c.bounds;
     // A stack belongs over a fire. Where a hearth or an oven backs onto an outside wall, the flue rises
     // against that wall and in line with it; only a range whose fires are all internal takes a stack on the
@@ -1731,6 +1838,9 @@ function buildGeometry(p:Plan){
       else if(f.z<=b.z+2)stacks.push([{x:f.x,z:b.z-2,w:Math.max(2,f.w),d:2},r,'n']);
       else if(f.z+f.d>=b.z+b.d-2)stacks.push([{x:f.x,z:b.z+b.d+1,w:Math.max(2,f.w),d:2},r,'s']);
     }
+    // A hall whose fire stands in the middle of its floor vents through the louver over it, not through a
+    // stack on a corner it has no fire near: the fallback below is for ranges whose fires are merely internal.
+    if(c.kind==='hall'&&!stacks.length)continue;
     const sides=([[{x:b.x-2,z:b.z+3,w:2,d:3},'w'],[{x:b.x+b.w+1,z:b.z+3,w:2,d:3},'e'],[{x:b.x+3,z:b.z-2,w:3,d:2},'n'],[{x:b.x+3,z:b.z+b.d+1,w:3,d:2},'s']] as [Rect,'n'|'s'|'e'|'w'][]).map(([r,side])=>[r,undefined,side] as [Rect,Room|undefined,'n'|'s'|'e'|'w']);
     // A stack is a projection like any other: it stands clear of the ranges and of anything already built out.
     const found=[...stacks,...sides].find(([r])=>!p.components.some(other=>intersects(other.bounds,r))&&!taken.some(o=>intersects(o,r))
@@ -1742,6 +1852,17 @@ function buildGeometry(p:Plan){
     p.chimneys.push({bounds:chimney,fromY:c.baseY,toY,componentId:c.id});box(chimney,c.baseY,toY-c.baseY,8,'chimney',c.id);
     p.articulation.push({id:`a${p.articulation.length}`,role:'chimney',componentId:c.id,roomIds:over?[over.id]:[],
       bounds:chimney,side,baseY:c.baseY,topY:toY,reason:over?`The flue of the fire in the ${over.name.toLowerCase()}`:'A stack for the fires of this range'});
+  }
+  // An open hearth on the floor of a hall vents through a louver: a shaft cut through the roof over the fire,
+  // with a little lantern on posts standing clear of it. A hall with a fireplace against its flank has a stack
+  // instead, and neither is a decoration — each is the consequence of where the fire was put.
+  for(const r of p.rooms.filter(r=>r.kind==='hall'&&r.floorY===0)){
+    const c=p.components.find(o=>o.id===r.componentId)!,fire=r.furniture.find(f=>f.type==='hearth');
+    if(!fire||fire.x<=r.bounds.x+2||fire.x+fire.w>=r.bounds.x+r.bounds.w-2)continue;
+    const rise=Math.ceil(Math.min(c.bounds.w,c.bounds.d)/2)+3;
+    box({x:fire.x,z:fire.z,w:fire.w,d:fire.d},c.topY,rise,0,'air',c.id);
+    for(const [dx,dz] of [[-1,-1],[fire.w,-1],[-1,fire.d],[fire.w,fire.d]])box({x:fire.x+dx,z:fire.z+dz,w:1,d:1},c.topY+rise-3,3,1,'roof',c.id);
+    box({x:fire.x-1,z:fire.z-1,w:fire.w+3,d:fire.d+3},c.topY+rise,1,3,'roof',c.id);
   }
   const e=p.openings.find(o=>o.type==='entrance')!,out=e.outward!;box({x:e.x+(out.x>0?1:out.x<0?-7:0),z:e.z+(out.z>0?1:out.z<0?-7:0),w:e.axis==='x'?7:2,d:e.axis==='z'?7:2},-1,1,6,'ground');
   if(p.settings.garden){

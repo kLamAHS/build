@@ -118,6 +118,36 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
     if(!plan.rooms.some(r=>st.roomIds.includes(r.id)&&r.floorY===st.fromY)||!plan.rooms.some(r=>st.roomIds.includes(r.id)&&r.floorY===st.toY))
       issues.push(`${where} does not join a room at each of the levels it serves.`);
   }
+  // A yard the household can get into only one way is not a court but a gap with a gate on it: an open space
+  // belongs to a composition when the buildings round it address it and it is a way through.
+  for(const c of plan.components.filter(c=>c.kind==='court')){
+    const room=plan.rooms.find(r=>r.componentId===c.id);
+    if(!room)continue;
+    const ways=plan.connections.filter(e=>e.includes(room.id)).length;
+    if(ways<2)issues.push(`${c.name} is entered ${ways?'one way':'no way'} only, so it is a dead end rather than a court.`);
+  }
+  // ---- Motifs. What makes an arrangement that arrangement is checked, not assumed: a hall whose dais has
+  // wandered out of its high end, or whose screens no longer stand at the serving end, is a long room with
+  // furniture in it rather than a hall.
+  const holds=(a:Rect,b:Rect)=>b.x>=a.x-1&&b.z>=a.z-1&&b.x+b.w<=a.x+a.w+1&&b.z+b.d<=a.z+a.d+1;
+  for(const m of plan.motifs){
+    const where=`The ${m.kind} motif (${m.variant})`;
+    if(m.high.x<m.low.x+m.low.w&&m.high.x+m.high.w>m.low.x&&m.high.z<m.low.z+m.low.d&&m.high.z+m.high.d>m.low.z)
+      issues.push(`${where} has both its ends in the same place.`);
+    for(const port of m.ports){
+      if(!plan.openings.some(o=>o.id===port.openingId))issues.push(`${where} has a ${port.role} port through no opening.`);
+      if(!m.roomIds.includes(port.roomId))issues.push(`${where} has a ${port.role} port in a room outside it.`);
+    }
+    if(m.kind!=='hall')continue;
+    const body=plan.rooms.find(r=>m.roomIds.includes(r.id)&&r.kind==='hall');
+    if(!body){issues.push(`${where} has no hall in it.`);continue;}
+    const long=Math.max(body.bounds.w,body.bounds.d)-1,short=Math.min(body.bounds.w,body.bounds.d)-1;
+    if(long<short*1.35)issues.push(`${where} is ${long} by ${short}, which has no long axis to have ends on.`);
+    const dais=body.furniture.find(f=>f.type==='dais');
+    if(dais&&!holds(m.high,dais))issues.push(`${where} has its dais outside its high end.`);
+    const screens=plan.rooms.find(r=>m.roomIds.includes(r.id)&&r.kind==='circulation');
+    if(screens&&!holds(m.low,screens.bounds))issues.push(`${where} has its screens outside its serving end.`);
+  }
   // A door may not open onto a void it was never meant to reach, whatever made the void.
   for(const o of plan.openings){
     if(o.type==='window')continue;

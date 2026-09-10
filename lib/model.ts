@@ -38,6 +38,16 @@ export type Chimney={bounds:Rect;fromY:number;toY:number;componentId:string};
  */
 export type ArticulationRole='bay'|'oriel'|'chimney'|'niche'|'jetty';
 export type Articulation={id:string;role:ArticulationRole;componentId:string;roomIds:string[];bounds:Rect;side:'n'|'s'|'e'|'w';baseY:number;topY:number;reason:string};
+/**
+ * A motif is an arrangement whose ends are not interchangeable, recorded so that the relationships which
+ * make it that arrangement can be checked rather than assumed. A hall has a high end and a serving end and
+ * takes its public, service and private doors at the ends they belong to; a gate has an outer threshold and
+ * an inner one and a passage between them. The variant says which form of the motif this is; two seeds may
+ * raise the same motif in different forms, but neither may raise one whose ends have swapped places.
+ */
+export type MotifKind='hall'|'gate';
+export type MotifPort={role:'public'|'service'|'private';roomId:string;openingId:string};
+export type Motif={id:string;kind:MotifKind;variant:string;componentId:string;roomIds:string[];axis:'x'|'z';high:Rect;low:Rect;ports:MotifPort[];reason:string};
 export type Yard={name:string;bounds:Rect;kind:'stable'|'service'|'garden'|'muster'};
 export type Court={id:string;name:string;bounds:Rect;gate:Point;wallHeight:number;thickness:number;gatehouse:Rect;well?:Point;yards:Yard[]};
 export type Route={id:string;name:string;points:Point[];width:number};
@@ -45,7 +55,7 @@ export type Transit={roomId:string;name:string;kind:RoomKind;floorY:number;stran
 /** How the finished plan actually walks: forced crossings, route length and alternative routes. */
 export type Navigation={maxDepth:number;meanDepth:number;loops:number;unreachable:string[];transits:Transit[];strandedRooms:number;compromises:number;score:number};
 export type { Composition } from './composition.ts';
-export type Plan={schemaVersion:2;generatorVersion:'2.0';name:string;settings:Settings;family:Family;components:BuildingComponent[];rooms:Room[];floors:Floor[];openings:Opening[];stairs:Stair[];chimneys:Chimney[];articulation:Articulation[];reservations:Reservation[];courts:Court[];routes:Route[];blocks:BlockBox[];walls:BlockBox[];slabs:BlockBox[];roofs:BlockBox[];supports:BlockBox[];bounds:Rect;minY:number;maxY:number;width:number;depth:number;totalArea:number;entry:Point;connections:[string,string][];suites:Suite[];validation:{valid:boolean;issues:string[]};navigation:Navigation;composition:import('./composition.ts').Composition;signature:string};
+export type Plan={schemaVersion:2;generatorVersion:'2.0';name:string;settings:Settings;family:Family;components:BuildingComponent[];rooms:Room[];floors:Floor[];openings:Opening[];stairs:Stair[];chimneys:Chimney[];articulation:Articulation[];reservations:Reservation[];motifs:Motif[];courts:Court[];routes:Route[];blocks:BlockBox[];walls:BlockBox[];slabs:BlockBox[];roofs:BlockBox[];supports:BlockBox[];bounds:Rect;minY:number;maxY:number;width:number;depth:number;totalArea:number;entry:Point;connections:[string,string][];suites:Suite[];validation:{valid:boolean;issues:string[]};navigation:Navigation;composition:import('./composition.ts').Composition;signature:string};
 export type BuildingPlanV2=Plan;
 export type GenerationResult={ok:true;plan:Plan}|{ok:false;error:string};
 export const FAMILIES:Record<BuildKind,{id:Family;name:string;description:string}[]>={

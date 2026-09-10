@@ -680,3 +680,75 @@ void test('the storeys inherit their volumes instead of discovering them',()=>{
   assert.ok(exceptions>0,'no gallery ever overlooks a hall, so the exception is never exercised');
   assert.ok(upper>500,`only ${upper} rooms above the ground floor surveyed`);
 });
+
+void test('a hall is a hall: its ends are not interchangeable, and it has more than one form',()=>{
+  // The defect this answers: a hall as wide as it was long, so neither end was an end; the kitchen opening
+  // beside the dais; and one hearth in one place whatever the hall or the household was.
+  const variants=new Set<string>();const ratios:number[]=[];let halls=0,gates=0,ports=0,atServing=0;
+  const settings=(['house','manor','castle'] as const).flatMap(kind=>FAMILIES[kind].flatMap(f=>
+    [128,256,384].map(size=>({...DEFAULT_SETTINGS,kind,size,floors:3,seed:`MOTIF-${size}`,family:f.id}))));
+  for(const s of settings){
+    const p=generatePlan(s);
+    const tag=`${s.kind}/${s.family}/${s.size}`;
+    const hall=p.motifs.find(m=>m.kind==='hall');
+    assert.ok(hall,`${tag}: the hall is not recorded as a hall`);
+    halls++;variants.add(hall!.variant);
+    gates+=p.motifs.filter(m=>m.kind==='gate').length;
+    const body=p.rooms.find(r=>hall!.roomIds.includes(r.id)&&r.kind==='hall')!;
+    const long=Math.max(body.bounds.w,body.bounds.d)-1,short=Math.min(body.bounds.w,body.bounds.d)-1;
+    ratios.push(long/short);
+    assert.ok(long>=short*1.35,`${tag}: the hall is ${long} by ${short}, which has no long axis to have ends on`);
+    // The dais stands at the high end and the screens at the serving end, and they are not the same end.
+    assert.ok(!intersects(hall!.high,hall!.low),`${tag}: the hall's two ends are in the same place`);
+    const dais=body.furniture.find(f=>f.type==='dais');
+    if(dais)assert.ok(dais.z>=hall!.high.z-1&&dais.z+dais.d<=hall!.high.z+hall!.high.d+1
+      &&dais.x>=hall!.high.x-1&&dais.x+dais.w<=hall!.high.x+hall!.high.w+1,`${tag}: the dais is not at the high end`);
+    const screens=p.rooms.find(r=>hall!.roomIds.includes(r.id)&&r.kind==='circulation');
+    assert.ok(screens,`${tag}: the hall has no screens passage`);
+    // A hall has a fire, and where it stands is a choice with consequences: a louver or a stack, not both.
+    const fire=body.furniture.find(f=>f.type==='hearth');
+    assert.ok(fire,`${tag}: the hall has no fire`);
+    const central=fire!.x>body.bounds.x+2&&fire!.x+fire!.w<body.bounds.x+body.bounds.w-2;
+    assert.equal(central,hall!.variant.startsWith('open-hearth'),`${tag}: the variant and the hearth disagree`);
+    if(central)assert.ok(!p.chimneys.some(c=>c.componentId===hall!.componentId),`${tag}: an open hearth with a stack over it`);
+    // The service doors belong at the serving end: dinner does not come past the dais.
+    for(const port of hall!.ports){
+      ports++;
+      const o=p.openings.find(x=>x.id===port.openingId)!;
+      const along=hall!.axis==='z'?o.z:o.x;
+      const hi=hall!.axis==='z'?hall!.high.z+hall!.high.d:hall!.high.x+hall!.high.w;
+      const lo=hall!.axis==='z'?hall!.high.z:hall!.high.x;
+      if(port.role==='service'&&(along<lo-1||along>hi+1))atServing++;
+      else if(port.role!=='service')atServing++;
+    }
+  }
+  assert.ok(variants.size>=3,`the hall is raised in only ${variants.size} forms: ${[...variants].join(', ')}`);
+  assert.ok(gates>=halls*.7,`only ${gates} gate motifs for ${halls} halls`);
+  ratios.sort((a,b)=>a-b);
+  assert.ok(ratios[Math.floor(ratios.length/2)]>=1.6,`the median hall is ${ratios[Math.floor(ratios.length/2)].toFixed(2)}:1`);
+  assert.ok(atServing/ports>=.95,`only ${atServing} of ${ports} hall doors are at the end they belong to`);
+});
+void test('new seeds vary in architecture, not only in labels or in which way round it is',()=>{
+  // The defect this answers: a courtyard castle whose every dimension came off the site budget, so sixty
+  // seeds raised the same castle sixty times over. What counts as a difference here is what a reader would
+  // see with the labels off: the kinds of volume, their proportions and their heights — never a mirror.
+  const shape=(c:{bounds:Rect;kind:string;storeys:number})=>{
+    const long=Math.max(c.bounds.w,c.bounds.d),short=Math.min(c.bounds.w,c.bounds.d);
+    return `${c.kind}:${long>=short*1.7?'range':long>=short*1.25?'block':'square'}:${c.storeys}`;
+  };
+  let worst=Infinity,worstFamily='';
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind]){
+    const massings=new Map<string,number>();
+    const N=24;
+    for(let i=0;i<N;i++){
+      const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size:256,floors:3,seed:`SEEDS-${i}`});
+      const key=p.components.map(shape).sort().join('|');
+      massings.set(key,(massings.get(key)??0)+1);
+    }
+    const share=massings.size/N;
+    if(share<worst){worst=share;worstFamily=family.id;}
+    assert.ok(massings.size>=N*.33,`${family.id}: only ${massings.size} distinct massings in ${N} seeds`);
+    assert.ok(Math.max(...massings.values())<=N*.4,`${family.id}: ${Math.max(...massings.values())} of ${N} seeds raise the same massing`);
+  }
+  assert.ok(worst>=.33,`${worstFamily} is the least varied at ${(worst*100).toFixed(0)}%`);
+});

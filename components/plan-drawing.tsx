@@ -8,7 +8,7 @@ import type { BlockLayer } from '@/lib/voxels';
 export type Diagnostic='off'|'volumes'|'circulation'|'facade'|'fit';
 export const DIAGNOSTICS:{id:Diagnostic;name:string;hint:string}[]=[
   {id:'off',name:'None',hint:'The finished drawing'},
-  {id:'volumes',name:'Volumes',hint:'What was composed, which build each range belongs to, and how far it stands from the hall'},
+  {id:'volumes',name:'Volumes',hint:'What was composed, which build each range belongs to, how far it stands from the hall, and where each motif has its ends and ports'},
   {id:'circulation',name:'Circulation',hint:'Every doorway, how many you cross to reach a room, and any forced crossing'},
   {id:'facade',name:'Facade bays',hint:'The bay lines each wall was divided into, which took a light, and where the wall steps out of line'},
   {id:'fit',name:'Room fit',hint:'How near each room stands to the proportion and area it is allowed'},
@@ -46,6 +46,26 @@ function Diagnostics({plan,floor,mode}:{plan:Plan;floor:Floor;mode:Diagnostic}){
         </g>;})}
       {plan.components.flatMap((c,i)=>plan.components.slice(i+1).filter(o=>abut(c.bounds,o.bounds)).map(o=>
         <line key={`${c.id}-${o.id}`} x1={c.bounds.x+c.bounds.w/2} y1={c.bounds.z+c.bounds.d/2} x2={o.bounds.x+o.bounds.w/2} y2={o.bounds.z+o.bounds.d/2} stroke="#3d6f9e" strokeWidth=".35" opacity=".5"/>))}
+      {/* A motif's two ends are not interchangeable, so the overlay says which is which and what the variant was. */}
+      {y===0&&plan.motifs.flatMap(m=>[
+        <g key={`${m.id}-hi`}>
+          <rect x={m.high.x} y={m.high.z} width={m.high.w} height={m.high.d} fill="#a8632f1c" stroke="#a8632f" strokeWidth=".3" strokeDasharray="1.6 1"/>
+          <text x={m.high.x+m.high.w/2} y={m.high.z+m.high.d/2} fontSize="1.5" textAnchor="middle" fill="#8d5226" style={halo}>{m.kind==='hall'?'high end':'inner gate'}</text>
+        </g>,
+        <g key={`${m.id}-lo`}>
+          <rect x={m.low.x} y={m.low.z} width={m.low.w} height={m.low.d} fill="#5c7f4a1c" stroke="#5c7f4a" strokeWidth=".3" strokeDasharray="1.6 1"/>
+          <text x={m.low.x+m.low.w/2} y={m.low.z+m.low.d/2} fontSize="1.5" textAnchor="middle" fill="#416032" style={halo}>{m.kind==='hall'?'serving end':'outer gate'}</text>
+          <text x={m.low.x+m.low.w/2} y={m.low.z+m.low.d/2+2} fontSize="1.2" textAnchor="middle" fill="#416032" style={halo}>{m.variant}</text>
+        </g>,
+      ])}
+      {y===0&&plan.motifs.flatMap(m=>m.ports.map(port=>{
+        const o=plan.openings.find(x=>x.id===port.openingId);
+        if(!o)return null;
+        const hue=port.role==='service'?'#8a5a2b':port.role==='private'?'#7a5ba8':'#2f7a52';
+        return <g key={`${m.id}-${port.openingId}`}>
+          <circle cx={o.x+(o.axis==='z'?o.width/2:.5)} cy={o.z+(o.axis==='x'?o.width/2:.5)} r="1.1" fill={`${hue}44`} stroke={hue} strokeWidth=".3"/>
+          <text x={o.x+(o.axis==='z'?o.width/2:.5)} y={o.z+(o.axis==='x'?o.width/2:.5)+.45} fontSize="1.1" textAnchor="middle" fill={hue}>{port.role[0].toUpperCase()}</text>
+        </g>;}))}
     </g>;
   }
   if(mode==='circulation'){
