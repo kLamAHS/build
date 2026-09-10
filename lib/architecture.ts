@@ -1318,25 +1318,102 @@ function buildGeometry(p:Plan){
       }
     }
   }
-  // Exterior windows are accepted only when the other side is outside every occupied room.
-  // Cells a door or the entrance already occupies. A window cut into one of them blocks the doorway.
+  // ---- Facades. A wall is divided into bays before anything is cut into it, and the same bay lines serve
+  // every storey of a range, so an upper window stands over the one below rather than wherever a room on
+  // that floor happened to end. What a bay gets depends on what is behind it: a hall takes a tall light, a
+  // store a slit, a chapel a lancet; a hearth, a stair or a doorway takes none.
   const doorCells=new Set<string>();
   for(const o of p.openings){
     if(o.type==='window')continue;
     for(let w=-1;w<=o.width;w++)doorCells.add(`${o.x+(o.axis==='z'?w:0)},${o.z+(o.axis==='x'?w:0)}`);
   }
-  for(const r of p.rooms){
-    if(r.floorY<0||r.kind==='stairs'||r.kind==='court')continue;
-    for(const axis of ['x','z'] as const)for(const high of [false,true]){
-      const b=r.bounds,fixed=axis==='x'?b.x+(high?b.w:0):b.z+(high?b.d:0),start=axis==='x'?b.z:b.x,len=axis==='x'?b.d:b.w;
-      // A wall too short for the seven-block rhythm still takes a single window on its centre line.
-      const stride=len>=10?7:Math.max(1,len-4),first=len>=10?start+3:start+Math.floor((len-2)/2);
-      for(let at=first;at<start+len-3;at+=stride){
-        const x=axis==='x'?fixed:at,z=axis==='z'?fixed:at;
-        const outX=axis==='x'?x+(high?1.5:-.5):x+.5,outZ=axis==='z'?z+(high?1.5:-.5):z+.5;
-        if(p.rooms.some(other=>other.floorY<=r.floorY&&other.ceilingY>r.floorY&&insidePolygon(outX,outZ,other.polygon)))continue;
-        if(r.floorY===0&&[0,1].some(w=>doorCells.has(`${x+(axis==='z'?w:0)},${z+(axis==='x'?w:0)}`)))continue;
-        p.openings.push({id:`w${p.openings.length}`,type:'window',axis,x,z,y:r.floorY+2,width:2,height:2,roomIds:[r.id]});
+  /** Bay centres along a wall, with a pier at each corner. Regular by intent: a rhythm is not a monotony. */
+  const bayCentres=(from:number,to:number,pier:number,target:number)=>{
+    const span=to-from-2*pier,out:number[]=[];
+    if(span<4)return out;
+    const count=Math.max(1,Math.round(span/target));
+    for(let i=0;i<count;i++)out.push(from+pier+Math.round(span*(i+.5)/count));
+    return out;
+  };
+  /** What each kind of room asks of its wall: how wide a light, how tall, and how high off the floor. */
+  const LIGHT:Partial<Record<RoomKind,{width:number;height:number;sill:number}>>={
+    hall:{width:2,height:4,sill:2},sacred:{width:2,height:4,sill:2},gallery:{width:2,height:2,sill:2},
+    study:{width:2,height:2,sill:2},bedroom:{width:2,height:2,sill:2},service:{width:2,height:2,sill:2},
+    circulation:{width:1,height:2,sill:2},storage:{width:1,height:2,sill:3},
+  };
+  const roomsAt=new Map<number,Room[]>();
+  for(const r of p.rooms)roomsAt.set(r.floorY,[...(roomsAt.get(r.floorY)??[]),r]);
+  // A room's bounds reject almost every point before the polygon test, and a clipped polygon never leaves
+  // its bounds, so the cheap test is a safe filter for the expensive one.
+  const holds=(r:Room,x:number,z:number)=>x>r.bounds.x&&x<r.bounds.x+r.bounds.w&&z>r.bounds.z&&z<r.bounds.z+r.bounds.d&&insidePolygon(x,z,r.polygon);
+  const tall=p.rooms.filter(r=>r.ceilingY-r.floorY>6);
+  const lit=new Set<string>();
+  for(const c of p.components){
+    if(c.kind==='court')continue;
+    const levels=[...new Set(p.rooms.filter(r=>r.componentId===c.id&&r.floorY>=0).map(r=>r.floorY))].sort((m,n)=>m-n);
+    // A castle's piers are heavier, and a chamfered tower has no straight wall within its cut corners.
+    const chamfer=c.kind==='tower'?Math.min(4,Math.floor(c.bounds.w/5)):0;
+    const pier=Math.max(p.settings.kind==='castle'?3:2,chamfer+1),target=c.kind==='tower'?7:6;
+    const b=c.bounds;
+    /** Cut one light into this wall at this point, if everything behind and beside it allows one. */
+    const place=(side:'n'|'s'|'e'|'w',at:number,y:number,narrow=false)=>{
+      const across=side==='n'||side==='s',axis=across?'z':'x';
+      const fo=componentFootprint(c,y,p.family);
+      const fixed=side==='n'?fo.z:side==='s'?fo.z+fo.d:side==='w'?fo.x:fo.x+fo.w;
+      const inward=side==='n'||side==='w'?1:-1;
+      const sample=(along:number,step:number)=>across?{x:along+.5,z:fixed+step}:{x:fixed+step,z:along+.5};
+      const level=roomsAt.get(y)??[];
+      const inner=sample(at,inward>0?1.5:-.5);
+      const room=level.find(r=>r.componentId===c.id&&holds(r,inner.x,inner.z));
+      const wants=room&&LIGHT[room.kind];
+      if(!room||!wants)return false;
+      // A wall with no room for a pier either side of a full light still takes a single-block one.
+      const light=narrow?{...wants,width:1}:wants;
+      const start=at-Math.floor(light.width/2);
+      // A pier either side: every cell of the light and one beyond it belongs to the one room behind.
+      for(let w=-1;w<=light.width;w++){
+        const cell=sample(start+w,inward>0?1.5:-.5);
+        if(!holds(room,cell.x,cell.z))return false;
+      }
+      // The other side has to be open ground at this level, and nothing may already occupy the wall.
+      const outer=sample(at,inward>0?-.5:.5);
+      if(level.some(o=>o.id!==room.id&&holds(o,outer.x,outer.z)))return false;
+      if(tall.some(o=>o.floorY<y&&o.ceilingY>y&&holds(o,outer.x,outer.z)))return false;
+      const cells=Array.from({length:light.width},(_,w)=>across?`${start+w},${fixed}`:`${fixed},${start+w}`);
+      if(cells.some(k=>doorCells.has(k)))return false;
+      // A hearth or an oven standing against this wall is a mass of masonry, not a place for a window.
+      const mass={x:across?start-1:fixed-1,z:across?fixed-1:start-1,w:across?light.width+2:3,d:across?3:light.width+2};
+      if(room.furniture.some(fu=>(fu.type==='hearth'||fu.type==='oven')&&intersects(fu,mass)))return false;
+      const x=across?start:fixed,z=across?fixed:start;
+      p.openings.push({id:`w${p.openings.length}`,type:'window',axis,x,z,y:y+light.sill,width:light.width,height:light.height,roomIds:[room.id]});
+      // A hall carried through two storeys takes a second tier of light above the first.
+      if(room.ceilingY-room.floorY>=12)p.openings.push({id:`w${p.openings.length}`,type:'window',axis,x,z,y:y+light.sill+6,width:light.width,height:light.height,roomIds:[room.id]});
+      lit.add(room.id);
+      return true;
+    };
+    for(const side of ['n','s','e','w'] as const){
+      const across=side==='n'||side==='s';
+      for(const at of bayCentres(across?b.x:b.z,across?b.x+b.w:b.z+b.d,pier,target))for(const y of levels)place(side,at,y);
+    }
+    // Where the bay rhythm and the rooms behind it disagree, they are repaired together: a room the rhythm
+    // misses, but which has a wall of its own to the outside, takes its light on its own centre line.
+    for(const y of levels){
+      const fo=componentFootprint(c,y,p.family);
+      for(const r of (roomsAt.get(y)??[])){
+        if(r.componentId!==c.id||lit.has(r.id)||!LIGHT[r.kind])continue;
+        for(const side of ['s','e','n','w'] as const){
+          const across=side==='n'||side==='s',rb=r.bounds;
+          const edge=side==='n'?fo.z:side==='s'?fo.z+fo.d:side==='w'?fo.x:fo.x+fo.w;
+          if((side==='n'?rb.z:side==='s'?rb.z+rb.d:side==='w'?rb.x:rb.x+rb.w)!==edge)continue;
+          const lo=across?rb.x:rb.z,hi=across?rb.x+rb.w:rb.z+rb.d,mid=Math.floor((lo+hi)/2);
+          // Off the rhythm but still on the wall's own grid, so a repaired light stands over the storeys
+          // below it rather than wherever this floor's rooms happen to divide.
+          const from=across?b.x:b.z,to=across?b.x+b.w:b.z+b.d,grid:number[]=[];
+          for(let at=from+pier;at<=to-pier;at+=3)if(at>lo&&at<hi)grid.push(at);
+          grid.sort((m,n)=>Math.abs(m-mid)-Math.abs(n-mid)||m-n);
+          const spots=[...grid,mid];
+          if(spots.some(at=>place(side,at,y))||spots.some(at=>place(side,at,y,true)))break;
+        }
       }
     }
   }
@@ -1353,8 +1430,18 @@ function buildGeometry(p:Plan){
   for(const r of p.rooms)for(const f of r.furniture)box(f,f.y,f.h,f.material,'furniture',r.componentId);
   for(const c of p.components.filter(c=>c.kind==='service'||c.kind==='hall'||c.kind==='domestic').slice(0,8)){
     const b=c.bounds;
+    // A stack belongs over a fire. Where a hearth or an oven backs onto an outside wall, the flue rises
+    // against that wall and in line with it; only a range whose fires are all internal takes a stack on the
+    // first free corner instead.
+    const stacks:Rect[]=[];
+    for(const f of p.rooms.filter(r=>r.componentId===c.id&&r.floorY===0).flatMap(r=>r.furniture.filter(fu=>fu.type==='hearth'||fu.type==='oven'))){
+      if(f.x<=b.x+2)stacks.push({x:b.x-2,z:f.z,w:2,d:Math.max(2,f.d)});
+      else if(f.x+f.w>=b.x+b.w-2)stacks.push({x:b.x+b.w+1,z:f.z,w:2,d:Math.max(2,f.d)});
+      else if(f.z<=b.z+2)stacks.push({x:f.x,z:b.z-2,w:Math.max(2,f.w),d:2});
+      else if(f.z+f.d>=b.z+b.d-2)stacks.push({x:f.x,z:b.z+b.d+1,w:Math.max(2,f.w),d:2});
+    }
     const sides=[{x:b.x-2,z:b.z+3,w:2,d:3},{x:b.x+b.w+1,z:b.z+3,w:2,d:3},{x:b.x+3,z:b.z-2,w:3,d:2},{x:b.x+3,z:b.z+b.d+1,w:3,d:2}];
-    const chimney=sides.find(r=>!p.components.some(other=>intersects(other.bounds,r)));
+    const chimney=[...stacks,...sides].find(r=>!p.components.some(other=>intersects(other.bounds,r)));
     if(!chimney)continue;
     const toY=c.topY+Math.ceil(Math.min(b.w,b.d)/2)+4;
     p.chimneys.push({bounds:chimney,fromY:c.baseY,toY,componentId:c.id});box(chimney,c.baseY,toY-c.baseY,8,'chimney',c.id);

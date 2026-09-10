@@ -124,6 +124,34 @@ so these are real geometry rather than a drawing convention. Two rules bound the
 straight four-block run of wall to receive its door, and its floor never pinches below the two walkable
 blocks a household needs.
 
+## Facades
+
+A window used to be stamped every seven blocks from each room's own corner, the same two-by-two light for a
+pantry as for a great hall, and on an upper storey it fell wherever that floor's rooms happened to divide.
+
+A wall is now divided into **bays** before anything is cut into it. The bay lines come from the range itself —
+a pier at each corner, then an even rhythm at roughly six blocks, or seven for a tower, with heavier piers on
+a castle and no bay at all inside a chamfered corner. The same lines serve every storey, so an upper light
+stands over the one below rather than over nothing. Across the standard set 65% of upper lights now stand
+over a lower one, against 48% before.
+
+What a bay gets depends on what is behind it. A hall or a chapel takes a tall light and a second tier above
+it where the volume is carried through two storeys; a chamber or a study takes an ordinary one; a store or a
+passage takes a slit, set higher. A bay is refused where the wall is a doorway, where a hearth or an oven
+stands against it as a mass of masonry, where the room behind is a stair, or where the light and a pier
+either side would not all belong to the same room — which is what keeps a window out of a corner pier and
+off an internal division.
+
+Where the bay rhythm and the rooms behind it disagree, they are repaired together rather than one overruling
+the other: a room the rhythm misses, but which has a wall of its own to the outside, takes its light on the
+same wall grid, and a narrow one where a full light will not fit. Sixteen rooms in a 2,600-room survey still
+have an outside wall and no window, against seven before; every other windowless room has no outside wall at
+all, which is a massing question rather than a window one.
+
+A chimney now rises over a fire. Where a hearth or an oven backs onto an outside wall the flue stands against
+that wall and in line with it; only a range whose fires are all internal takes a stack on the first free
+corner instead.
+
 ## The courtyard castle
 
 `courtyard-castle` is the archetype laid out site first. The court is placed before anything else, and the

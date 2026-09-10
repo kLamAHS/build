@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { candidateCount, generateCandidate, generatePlan, rank, tryGenerate } from './architecture.ts';
 import { compositionReport } from './composition.ts';
-import { DEFAULT_SETTINGS, FAMILIES, insidePolygon, type Settings, type Plan, type Rect } from './model.ts';
+import { DEFAULT_SETTINGS, FAMILIES, insidePolygon, intersects, type Settings, type Plan, type Rect } from './model.ts';
 import { voxelize, prepareMeshes, SparseBlocks } from './voxels.ts';
 import { auditArchitecture } from './architectural-audit.ts';
 import { accessGraph, transitViolations, isCirculation, routeToRoom, navigationReport, articulationPoints } from './navigation.ts';
@@ -255,6 +255,44 @@ void test('ordinary rooms keep their proportions: no strip a wing long, nothing 
   assert.ok(counted>500,`only ${counted} ordinary rooms surveyed`);
   assert.ok(worstShape<=3.2,`the longest ordinary room is ${worstShape.toFixed(1)} times its width: ${shape}`);
   assert.ok(worstSize<=760,`the largest ordinary room has taken ${worstSize} blocks: ${size}`);
+});
+void test('a wall is divided into bays before anything is cut into it',()=>{
+  // The defect this answers: one window every seven blocks from each room's own corner, the same size for a
+  // pantry as for a great hall, and an upper storey whose lights fell wherever that floor's rooms divided.
+  let windows=0,upper=0,over=0;const forms=new Set<string>();
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    const byId=new Map(p.rooms.map(r=>[r.id,r]));
+    const doors=new Set(p.openings.filter(o=>o.type!=='window').flatMap(o=>
+      Array.from({length:o.width},(_,w)=>`${o.x+(o.axis==='z'?w:0)},${o.z+(o.axis==='x'?w:0)}`)));
+    const bays=new Map<string,number[]>();
+    for(const o of p.openings.filter(o=>o.type==='window')){
+      windows++;forms.add(`${o.width}x${o.height}`);
+      const room=byId.get(o.roomIds[0])!;
+      const across=o.axis==='z';
+      // A pier either side: the wall cell beyond each end of the light belongs to the same room behind it.
+      for(let w=-1;w<=o.width;w++){
+        const x=across?o.x+w:o.x,z=across?o.z:o.z+w;
+        const inside=across?{x:x+.5,z:z+(z===room.bounds.z?1.5:-.5)}:{x:x+(x===room.bounds.x?1.5:-.5),z:z+.5};
+        assert.ok(insidePolygon(inside.x,inside.z,room.polygon),`${settings.seed}: ${room.name} has a light with no pier beside it`);
+      }
+      for(let w=0;w<o.width;w++)assert.ok(!doors.has(`${o.x+(across?w:0)},${o.z+(across?0:w)}`),`${settings.seed}: a light is cut through a doorway`);
+      // Nothing is cut through a hearth mass.
+      const mass={x:o.x-1,z:o.z-1,w:(across?o.width:1)+2,d:(across?1:o.width)+2};
+      for(const fu of room.furniture)if(fu.type==='hearth'||fu.type==='oven')
+        assert.ok(!intersects(fu,mass),`${settings.seed}: a light is cut through the ${fu.type} in ${room.name}`);
+      // Bays are lines on the range's wall, so a light on one storey stands over the light below it.
+      const c=p.components.find(x=>x.id===room.componentId)!;
+      const along=(across?o.x:o.z)+Math.floor(o.width/2);
+      const near=across?o.z<c.bounds.z+c.bounds.d/2:o.x<c.bounds.x+c.bounds.w/2;
+      const key=`${room.componentId}:${o.axis}:${near?'lo':'hi'}:${along}`;
+      bays.set(key,[...(bays.get(key)??[]),room.floorY]);
+    }
+    for(const [key,levels] of bays)for(const y of levels)if(y>0){upper++;if(levels.some(other=>other<y))over++;void key;}
+  }
+  assert.ok(windows>500,`only ${windows} lights across the standard set`);
+  assert.ok(forms.size>=3,`every light is the same shape: ${[...forms].join(', ')}`);
+  assert.ok(over/Math.max(1,upper)>=0.55,`only ${over} of ${upper} upper lights stand over one below`);
 });
 void test('candidates are ranked on how they stand as well as on how they walk',()=>{
   // The ranker used to return the first candidate with no forced crossing, whatever it looked like, so a
