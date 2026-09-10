@@ -412,6 +412,26 @@ account for 1.8% of all rooms.
 A bay's seat is furniture like any other, so it is drawn, exported and voxelised with the rest — a bay window
 without a window seat is a corridor with a view.
 
+## The forecourt
+
+Every addition either squared up to its host or stood across a yard from it, so the only outdoor room the
+composition could make was one enclosed between two facing walls.
+
+A range may now be set **alongside** another, running the same way, and **stepped past the end of it**. What
+that leaves is a forecourt: an outdoor room closed on two sides that meet, and open on the others — which is
+a different thing from a yard enclosed between two faces. Two preconditions keep it a composition rather than
+a leftover: the two ranges must overlap by enough to share a wall a door can go in, and the step must be long
+enough that what it leaves is a court and not a slot.
+
+That is §5.2's *offset a parallel wing*, and it joins the three moves already there — a wing square to its
+host, a range across an open yard, and a range dropped into a gap two masses already leave facing each other.
+115 forecourts across a 144-plan slice, in 78 of the plans.
+
+One more composition operation made one setting in nine hundred and sixty harder to solve — a 512-block
+eight-storey castle came back with a chamber somebody had to walk through. The attempt cap went from eight to
+twelve. Only a seed that has not yet produced a plan without a forced crossing ever pays it; an easy seed
+still returns at its budget, and the slowest single build is 1.8 seconds.
+
 ## The covered walk
 
 A courtyard range's walk used to be a corridor with doors onto the yard, which made the court the gap left

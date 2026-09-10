@@ -289,6 +289,27 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     if(made)add('court',`${need.name.split(' ')[0]} yard`,yard,1,parent);
     return made;
   }
+  /**
+   * A second range set alongside the first, running the same way, and stepped past the end of it. What that
+   * leaves is a forecourt: an outdoor room closed on two sides by the two masses and open on the others,
+   * which is a different thing from a yard enclosed between them. Two preconditions keep it a composition
+   * rather than a leftover — the ranges must overlap by enough to share a wall a door can go in, and the
+   * step must be long enough that what it leaves is a court and not a slot.
+   */
+  function opParallel(need:Need,parent:BuildingComponent,toward:-1|1,ahead:boolean,proj:number){
+    const b=parent.bounds,alongZ=b.d>=b.w;
+    const len=alongZ?b.d:b.w,depth=alongZ?b.w:b.d,lap=need.along-proj;
+    if(lap<MIN_ROOM+1||proj<12||lap>len)return undefined;
+    const start=(alongZ?b.z:b.x)+(ahead?len-lap:-proj);
+    const off=(alongZ?b.x:b.z)+(toward>0?depth:-need.across);
+    const wing:Rect=alongZ?{x:off,z:start,w:need.across,d:need.along}:{x:start,z:off,w:need.along,d:need.across};
+    const at=(alongZ?b.z:b.x)+(ahead?len:-proj);
+    const court:Rect=alongZ?{x:b.x,z:at,w:b.w,d:proj}:{x:at,z:b.z,w:proj,d:b.d};
+    if(!free(wing)||!free(court))return undefined;
+    const made=add(need.kind,need.name,wing,need.storeys,parent);
+    if(made)add('court',`${need.name.split(' ')[0]} forecourt`,court,1,parent);
+    return made;
+  }
   /** A range dropped into a gap two masses already leave facing each other, joining them into one range. */
   function opCross(need:Need){
     const all=hosts();
@@ -319,8 +340,10 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       const parents=hosts(),parent=parents[Math.floor(rng()*parents.length)];
       const side=(['n','s','e','w'] as const)[Math.floor(rng()*4)];
       const align=([-1,0,1] as const)[Math.floor(rng()*3)];
-      const yard=rng()<.34;
-      made=yard?opCourtRange(need,parent,side,ri(14,22)):opWing(need,parent,side,align);
+      const move=rng();
+      made=move<.26?opParallel(need,parent,rng()<.5?1:-1,rng()<.5,ri(14,24))
+        :move<.5?opCourtRange(need,parent,side,ri(14,22))
+        :opWing(need,parent,side,align);
     }
   }
   build(3);
@@ -1991,7 +2014,10 @@ export const candidateCount=(settings:Settings)=>settings.size>320?3:5;
  */
 export function tryGenerate(settings:Settings):GenerationResult {
   let reason='The composition could not be connected.';
-  const budget=candidateCount(settings),cap=8,candidates:Plan[]=[],audited=new Map<Plan,string[]>();
+  // The cap is only ever paid by a seed that has not yet produced a plan without a forced crossing: an easy
+  // seed returns at its budget. Raising it costs the hard seeds time and buys them the one thing this
+  // generator exists to give — a household that is never made to walk through somebody's chamber.
+  const budget=candidateCount(settings),cap=12,candidates:Plan[]=[],audited=new Map<Plan,string[]>();
   // Rank on what is cheap to know, and pay for the built check on the best of them in turn. Voxelising
   // every candidate to audit it costs more than composing them all, and tells us nothing about the losers.
   const best=()=>{
