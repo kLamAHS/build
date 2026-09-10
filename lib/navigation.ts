@@ -41,8 +41,12 @@ export function improperDoors(plan:Plan):Opening[] {
     const other=hall===a?b:a;
     if(other.componentId===hall.componentId)continue;
     const r=hall.bounds,along:'x'|'z'=r.d>=r.w?'z':'x';
-    if((along==='z')===(o.axis==='z'))continue;
     const lo=along==='z'?r.z:r.x,len=along==='z'?r.d:r.w,at=along==='z'?o.z:o.x;
+    // A service door beside the dais puts the household's dinner through its private end, which is the one
+    // thing a screens passage exists to prevent. Where the grammar was forced into one, it is a compromise.
+    const serving=kindOf.get(other.componentId);
+    if((serving==='service'||serving==='workshop')&&at<lo+Math.round(len/2)){out.push(o);continue;}
+    if((along==='z')===(o.axis==='z'))continue;
     if(at>lo+HALL_END&&at<lo+len-HALL_END-1)out.push(o);
   }
   return out;

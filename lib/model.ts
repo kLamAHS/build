@@ -5,18 +5,51 @@ export type Point={x:number;z:number};
 export type Rect=Point & {w:number;d:number};
 export type RoomKind='hall'|'bedroom'|'service'|'sacred'|'storage'|'study'|'circulation'|'stairs'|'gallery'|'court';
 export type ComponentKind='hall'|'domestic'|'service'|'tower'|'chapel'|'gatehouse'|'workshop'|'lodging'|'court';
-export type Furniture=Rect & {y:number;h:number;type:'table'|'bench'|'bed'|'shelf'|'hearth'|'desk'|'altar'|'oven'|'well'|'dais';material:number};
+export type Furniture=Rect & {y:number;h:number;type:'table'|'bench'|'bed'|'shelf'|'hearth'|'desk'|'altar'|'oven'|'well'|'dais'|'seat';material:number};
 export type Room={id:string;name:string;kind:RoomKind;componentId:string;suiteId?:string;bounds:Rect;polygon:Point[];holes:Rect[];floorY:number;ceilingY:number;area:number;description:string;furniture:Furniture[]};
 /** Rooms that belong to one occupant and are entered as a set: a chamber with its own wardrobe or garderobe. */
 export type Suite={id:string;name:string;kind:'lodging'|'lord'|'service'|'gate';roomIds:string[];headId:string};
 export type BuildingComponent={id:string;name:string;kind:ComponentKind;bounds:Rect;polygon:Point[];baseY:number;storeys:number;topY:number;roof:'gable-x'|'gable-z'|'pyramid'|'battlement';parentId?:string;phase:number};
 export type Opening={id:string;type:'door'|'window'|'entrance';axis:'x'|'z';x:number;y:number;z:number;width:number;height:number;roomIds:string[];outward?:Point};
 export type Stair={id:string;componentId:string;roomIds:string[];bounds:Rect;fromY:number;toY:number;width:number;headroom:number;landings:Rect[]};
-export type Void={id:string;name:string;bounds:Rect;polygon:Point[];holes:Rect[];floorY:number;ceilingY:number};
+export type Void={id:string;name:string;bounds:Rect;polygon:Point[];holes:Rect[];floorY:number;ceilingY:number;kind:ReservationKind};
+/**
+ * A volume the storeys owe each other, settled before any floor is divided so that an upper plan inherits
+ * it rather than discovering it. The four conditions are kept apart because they are not the same thing:
+ * a court is open exterior for its whole height, a hall is interior volume with no floor carried across it,
+ * a stair well is the hole one storey leaves in the next, and a loggia is covered overhead but open to the
+ * weather down one side. Nothing may be built in a reservation except what it names as its own exception —
+ * a gallery may overlook a hall, and a covered walk is what a loggia is for; a chamber may not be dropped
+ * into either.
+ */
+export type ReservationKind='hall'|'stair'|'court'|'loggia';
+export type Reservation={id:string;kind:ReservationKind;name:string;componentId:string;bounds:Rect;polygon:Point[];fromY:number;toY:number;open:'interior'|'exterior'|'covered';side?:'n'|'s'|'e'|'w';reason:string};
 export type Floor={index:number;name:string;elevation:number;rooms:Room[];voids:Void[];roofComponents:string[]};
 export type BlockKind='wall'|'floor'|'roof'|'stair'|'support'|'furniture'|'ground'|'glass'|'chimney'|'air';
 export type BlockBox={x:number;y:number;z:number;w:number;h:number;d:number;material:number;kind:BlockKind;componentId:string;ownerFloor?:number};
 export type Chimney={bounds:Rect;fromY:number;toY:number;componentId:string};
+/**
+ * Every place a wall does something other than run straight from corner to corner, and the reason it does.
+ * A bay steps out to light and seat a principal room; an oriel is the same thing carried on corbels over
+ * open ground; a chimney is the mass of a fire taken outside; a niche is the inward case, a recess cut into
+ * a wall thick enough to give one away; a jetty is a whole upper storey oversailing the one below on its
+ * joists. The role is recorded so the effect it promises can be checked:
+ * a bay that never opens into its room, or a niche that breaks through its wall, is a defect and not a
+ * decoration. Whole projecting volumes — a tower, a chapel end, a gatehouse porch — carry their role in
+ * `ComponentKind` instead, and are not repeated here.
+ */
+export type ArticulationRole='bay'|'oriel'|'chimney'|'niche'|'jetty';
+export type Articulation={id:string;role:ArticulationRole;componentId:string;roomIds:string[];bounds:Rect;side:'n'|'s'|'e'|'w';baseY:number;topY:number;reason:string};
+/**
+ * A motif is an arrangement whose ends are not interchangeable, recorded so that the relationships which
+ * make it that arrangement can be checked rather than assumed. A hall has a high end and a serving end and
+ * takes its public, service and private doors at the ends they belong to; a gate has an outer threshold and
+ * an inner one and a passage between them. The variant says which form of the motif this is; two seeds may
+ * raise the same motif in different forms, but neither may raise one whose ends have swapped places.
+ */
+export type MotifKind='hall'|'gate';
+export type MotifPort={role:'public'|'service'|'private';roomId:string;openingId:string};
+export type Motif={id:string;kind:MotifKind;variant:string;componentId:string;roomIds:string[];axis:'x'|'z';high:Rect;low:Rect;ports:MotifPort[];reason:string};
 export type Yard={name:string;bounds:Rect;kind:'stable'|'service'|'garden'|'muster'};
 export type Court={id:string;name:string;bounds:Rect;gate:Point;wallHeight:number;thickness:number;gatehouse:Rect;well?:Point;yards:Yard[]};
 export type Route={id:string;name:string;points:Point[];width:number};
@@ -24,7 +57,7 @@ export type Transit={roomId:string;name:string;kind:RoomKind;floorY:number;stran
 /** How the finished plan actually walks: forced crossings, route length and alternative routes. */
 export type Navigation={maxDepth:number;meanDepth:number;loops:number;unreachable:string[];transits:Transit[];strandedRooms:number;compromises:number;score:number};
 export type { Composition } from './composition.ts';
-export type Plan={schemaVersion:2;generatorVersion:'2.0';name:string;settings:Settings;family:Family;components:BuildingComponent[];rooms:Room[];floors:Floor[];openings:Opening[];stairs:Stair[];chimneys:Chimney[];courts:Court[];routes:Route[];blocks:BlockBox[];walls:BlockBox[];slabs:BlockBox[];roofs:BlockBox[];supports:BlockBox[];bounds:Rect;minY:number;maxY:number;width:number;depth:number;totalArea:number;entry:Point;connections:[string,string][];suites:Suite[];validation:{valid:boolean;issues:string[]};navigation:Navigation;composition:import('./composition.ts').Composition;signature:string};
+export type Plan={schemaVersion:2;generatorVersion:'2.0';name:string;settings:Settings;family:Family;components:BuildingComponent[];rooms:Room[];floors:Floor[];openings:Opening[];stairs:Stair[];chimneys:Chimney[];articulation:Articulation[];reservations:Reservation[];motifs:Motif[];courts:Court[];routes:Route[];blocks:BlockBox[];walls:BlockBox[];slabs:BlockBox[];roofs:BlockBox[];supports:BlockBox[];bounds:Rect;minY:number;maxY:number;width:number;depth:number;totalArea:number;entry:Point;connections:[string,string][];suites:Suite[];validation:{valid:boolean;issues:string[]};navigation:Navigation;composition:import('./composition.ts').Composition;signature:string};
 export type BuildingPlanV2=Plan;
 export type GenerationResult={ok:true;plan:Plan}|{ok:false;error:string};
 export const FAMILIES:Record<BuildKind,{id:Family;name:string;description:string}[]>={

@@ -8,7 +8,25 @@ Use Node 22.13 or later, `npm install`, and `npm run dev`. Run `npm run build` t
 
 ## Checks
 
-`npm test` checks deterministic generation, 3,150 combinations of footprints and room geometry, aligned floors, size-dependent room counts, feature options, agent-tool input contracts, and the circulation rules below. `npx tsc --noEmit` checks types.
+`npm test` checks deterministic generation, 3,150 combinations of footprints and room geometry, aligned floors, size-dependent room counts, feature options, agent-tool input contracts, that every diagnostic overlay draws, and the circulation, composition, proportion and facade rules below. `npx tsc --noEmit` checks types.
+
+`npm run batch` runs the fixed-seed regression suite — 1,000 estates by default, `npm run batch 200` for a
+shorter run. It reports the two outcomes separately, and never adds them together:
+
+```
+settings 1000
+accepted-plan validity  1000/1000 (100.0%)
+search success          1000/1000 (100.0%)
+mean navigability 83.2  mean composition 91  mean rooms 90.7
+181s total, slowest 516ms
+```
+
+**Accepted-plan validity** is whether the plans the engine returns as valid actually are; **search success**
+is how often it finds an acceptable plan at all under its candidate budget. A run that quietly returned
+broken geometry and a run that honestly gave up are not the same failure, and one number would hide the one
+that matters. The exit code follows validity alone: giving up is a measurement, returning a broken plan is a
+defect. Index *i* of the batch always means the same estate, so a change that moves a plan shows up as a
+change in the batch rather than as a different sample.
 
 ## Circulation
 
@@ -29,6 +47,30 @@ access grammar rather than whichever walls happen to touch:
 number of independent routes, the deepest reach in doors, and any room a household is still forced to
 cross. `tryGenerate` composes several candidates and keeps the one that walks best. The studio shows the
 score beside the plan name and the door-by-door walk from the entrance for whichever room is selected.
+
+## Showing the working
+
+A defect in a finished drawing tells you what went wrong and nothing about which stage made it: a room drawn
+as a strip could have come from the programme that asked for it, the composition that gave it its ground, or
+the cut that divided the range. The plan view carries four overlays that each show one stage, chosen from the
+toolbar or by passing `diagnostics` to `PlanDrawing`.
+
+- **Volumes** — every range outlined and labelled with its kind, its proportions, its storeys, the build it
+  belongs to and how many volumes it stands from the hall, shaded by age, with a line for each wall two of
+  them share; and on the ground floor, each motif's two ends and every port it takes, marked P, S or R for
+  public, service and private. This is the composition stage: a straggling arm shows here as a chain of high
+  numbers, and a hall whose service door has crept up to the dais shows as an S in the high end.
+- **Circulation** — every doorway drawn as a line between the rooms it joins, every room as a dot carrying
+  the number of doors from the entrance, circulation and destinations coloured apart, and any room a
+  household is forced to cross ringed in red.
+- **Facade bays** — the bay lines each wall was divided into, green where the bay took a light and orange
+  where it was refused, with the corner piers marked, and every projection outlined and named by its role.
+  This is where a missing window is either a bay that was never there or a bay something stood in the way of.
+- **Room fit** — every room tinted by how near it stands to the proportion and area the audit will reject it
+  at, and labelled with its dimensions and aspect. This is the room-cutting stage.
+
+The bay lines are not redrawn for the overlay: `bayLines` in `lib/composition.ts` is the one description, used
+by the generator to place its openings and by the drawing to show where it put them.
 
 ## Choosing between compositions
 
@@ -124,6 +166,268 @@ so these are real geometry rather than a drawing convention. Two rules bound the
 straight four-block run of wall to receive its door, and its floor never pinches below the two walkable
 blocks a household needs.
 
+## What stands above the ground floor
+
+Every storey above the first used to hold the same accommodation whatever the range was for: bedchambers,
+guest chambers and wardrobes, in a building whose ground floor had just been given a solar, a brewhouse and a
+smithy. That flattens the hierarchy the composition built.
+
+A range's upper storeys now carry accommodation of their own, chosen by what the range is and which storey it
+is. A domestic range gives its first floor to the great chamber with its antechamber and closet and its
+second to bedchambers and dressing rooms; a lodging range gives one floor to guests and the next to attic
+lodgings; a service range houses the servants and grooms above its work; a workshop keeps its drying and
+store lofts. Across a 24-plan survey there are 32 kinds of room above ground where there were 12, and the
+commonest is one room in ten rather than one in five.
+
+The hole a stair comes up through is a void, and is drawn as one: its own perimeter, its hatch, and an
+annotation, rather than an unexplained grey gap in the boards. The audit rejects a plan where a door opens
+onto one — the route test would have caught it as a missing floor, but a household walking off a landing into
+the stair well deserves to be told what it is.
+
+## What every stage is held to
+
+A rule that lives only in the stage that places something can be undone by a later stage without anything
+saying so. These are checked on the finished plan, and a candidate that fails one is rejected and another
+composition tried:
+
+- An **ordinary room** forced into a strip past 3.2:1, or one that has eaten more than 760 blocks of its
+  range, is rejected — not renamed to something the rule does not cover. A **gallery** is a kind with its own
+  proportions, so a genuinely long connector is accepted for what it is.
+- A **court** is open exterior for its whole reserved height. An eave may oversail it — that is what an eave
+  is — but a floor or a roof carried across it is a yard with a lid on. Nineteen yards in a 159-yard sample
+  had a roof reaching four to seven blocks in, because a bay was projecting into them; a projection is now
+  kept out of a yard, which is composed open space rather than ground to build on.
+- A **light** is never cut through a wall two rooms share, nor through the mass of a hearth or an oven.
+- A **bay** may not take more than half the wall of the room it comes out of: a projection that has eaten its
+  host is not a bay.
+- A **stair** rises one storey, lands at both ends of that rise, keeps both landings inside its own shaft, and
+  joins a room at each level it serves.
+- An **upper room** stands over the storey below it or over a cantilever that says so, and never in a
+  reservation another volume was given.
+- A **hall** keeps its long axis, its dais at the high end, its screens at the serving end, and its service
+  doors out of the private half.
+- A **yard** is a way through, not a dead end with a gate on it.
+
+## Motifs, and what makes a hall a hall
+
+A hall used to be a room labelled `hall`: as wide as it was long, with a dais at one end because that was
+where the code put one. Nothing said what a hall *is*, so nothing could tell when it had stopped being one.
+
+`Plan.motifs` records an arrangement whose ends are not interchangeable, together with the relationships that
+make it that arrangement — and the audit then checks them rather than assuming them.
+
+**The hall.** Its long axis, its high end and its serving end, and its ports: the public way in, the service
+doors, the private door to the household's own side. The audit rejects a hall shorter than 1.35:1 on its long
+axis, a hall whose two ends are in the same place, a dais outside the high end, or screens outside the serving
+end. Halls were widened and shortened to fit — a median of 1.32:1, and 129 of 144 under 1.6 — and are now
+median **1.89:1**, with 3 of 144 under 1.6. Making them long meant putting the wings at their ends: the solar
+wing now stands at the high end and the kitchen range at the serving end, rather than both centred on the
+flanks, which is what makes a screens passage a threshold instead of a door halfway along a wall.
+
+**The gate.** Its outer threshold, its passage and its inner threshold, with the guard rooms beside it.
+
+**Hall variants.** §6.1 asks for the motif to have forms, not one drawing. The hearth strategy is the first:
+an **open hearth** stands in the middle of the floor and vents through a louver built over it — a shaft through
+the roof with a lantern on posts — and is what a hall retained from an earlier build still has; a **wall
+fireplace** stands against the flank and takes the stack, and the stack over the household's own fire is now
+placed before any service range's. With the high-end bay from the articulation pass, that gives four forms:
+*open-hearth*, *open-hearth-with-bay*, *wall-fireplace*, *wall-fireplace-with-bay*, spread roughly 40/60/25/20
+across a 144-plan slice.
+
+**Dinner does not come past the dais.** A door between the hall and a service or workshop range must be in the
+serving half of the long axis. That took service doors at the high end from 63 in 229 to 3 in 157. Where the
+door grammar is forced into one anyway to keep a range reachable, it is counted as a compromise and costs the
+candidate its rank, the same as any other improper door.
+
+**A yard is a way through.** An open space the household can enter only one way is a gap with a gate on it,
+not a court, and the audit rejects it.
+
+## New seeds vary in architecture
+
+The **courtyard castle** took every dimension straight off the site budget, so sixty seeds raised the same
+castle sixty times over: **one distinct massing in sixty seeds**. The court's proportion, the depth of each
+range, how tall the gate stands and whether the corners are towered are now the seed's to choose — a castle
+may have no corner towers, a pair, or all four, each set against the end of a flanking range so that a tower
+is a room of the household rather than an ornament in the grass. What stays fixed is the type: four ranges
+round a yard, the hall at its head, the way in opposite the hall.
+
+Sixty seeds now give **seventeen** distinct massings, with the commonest ten. Every other family already
+varied and still does: 54 to 60 distinct massings in 60 seeds, commonest 2 to 4. A massing here is what a
+reader would see with the labels off — the kinds of volume, their proportions and their heights — and it is
+measured so that a mirror, a rotation or a rename counts for nothing.
+
+## Vertical composition
+
+The hall void and the stair well used to be worked out again by whichever floor was being drawn, so nothing
+in the plan said which volumes the storeys owed each other, or why.
+
+`Plan.reservations` is settled before any floor is divided, so an upper plan inherits these volumes rather
+than discovering them. The three conditions are kept apart because they are not the same thing:
+
+- a **court** is open exterior for its whole height, which is as far up as the ranges around it stand;
+- a **hall** is interior volume with no floor carried across it, from the first floor to the top of the hall;
+- a **stair** well is the hole one storey leaves in the next, for the flight that comes up through it;
+- a **loggia** is covered overhead but open to the weather down one side.
+
+Each reservation names the exception it allows. A gallery may overlook a hall; a chamber may not be dropped
+into one. A stair well takes stairs and circulation and nothing else. A yard takes nothing at all unless a
+cantilever says otherwise. A loggia takes the covered walk it exists for, and must actually be both covered
+and open: it is checked for a roof somewhere above it and for an outer side that is arcade along more than
+half its length, with piers still standing between the bays. The audit enforces that, and a floor's voids are no longer worked out by the
+drawing — they are the reservations that reach that level, so a hole in the boards is always the volume
+something else was given. Across the 960-setting sweep that comes to a hall void in every estate that has a
+hall of more than one storey, 830 stair wells and 159 reserved yards in a 108-plan slice.
+
+Three further checks come with it. Every occupied upper room must be carried by the storey below it or by a
+cantilever that says so; every stair must rise exactly one storey, land at both ends of that rise, keep both
+landings inside its own shaft, and join a room at each level it serves; and no door may open onto a void it
+was never meant to reach.
+
+The first of those found a real defect. The merchant house's first floor **jetties** — it oversails the
+storey below by a block on two sides — and `componentFootprint` had always known that, but nothing else did:
+the storey stood in mid-air with no joists under it. A jetty is now an articulation like any other, with the
+joist course and the bracket ends built underneath it, drawn on the floor it oversails, and checked by the
+audit that it has something to stand on.
+
+**Level offsets are deliberately not modelled.** A floor is the set of rooms at one elevation, and the whole
+plan — the floor list, the drawing, the stair rise, the export — is keyed on that. Half-sunken undercrofts
+and split levels would need floors to be a range of elevations rather than one, which is a larger change than
+this section is worth; pretending to them by moving rooms between floor groups would be worse than not having
+them.
+
+## Construction history
+
+Every range of every seat used to be the same masonry, the same rhythm and the same window, because nothing
+in the plan recorded that a household builds against what is already standing.
+
+Each volume now belongs to a **build**. Phase 0 is inherited fabric: a core that was already there when this
+household began adding to it. Phases 1 and up are its own campaigns, taken two additions at a time in the
+order the composition placed them. Nothing here simulates history by nudging vertices about — a phase is a
+fact about a volume, and the masonry, the framing and the windows are then answerable to it.
+
+Not every seat grew. A formal quadrangle is raised in one go, and so is a quarter of everything else, on a
+decision taken off the seed rather than off the running sequence so that it does not shift a composition a
+seed already produces. A plan raised in one campaign has no phase 0 at all: one masonry, one rhythm, no seam.
+Nor does a plan the budget allowed nothing to be added to — a lone core is not inherited from anybody, it is
+simply the one build there ever was. Across the 960-setting sweep 382 seats keep inherited fabric and 578
+were raised in a single campaign.
+
+What the phase changes:
+
+- **Masonry.** A retained core carries one more block of wall than the later ranges around it, so the join
+  between an old range and a new one is a visible step in the facade rather than a line on a drawing.
+- **Framing.** An upper storey outside a castle is a timber frame on its studs — but never on a retained
+  core, which is masonry all the way up. 140 plans in the sweep carry framing.
+- **Rhythm.** An older wall was raised when a wall was structure before it was anything else, so it takes
+  wider piers and a coarser bay spacing; a later range can afford to be mostly window.
+- **Light.** In a retained core every opening but the showpiece ones — the hall, the chapel — is a single
+  block deep in its embrasure. Across the sweep every ordinary light in a retained core is a slit, against
+  56% of ordinary lights in later ranges taking the full width.
+
+The **volumes** overlay names the build each range belongs to and shades it by age, so a seam in the drawing
+can be traced back to the stage that made it.
+
+## Wall mass
+
+A wall one block thick whatever it carries reads as a line rather than as masonry, and the drawing has to
+fake the difference with a heavier stroke. An outside wall now has its real thickness — three blocks on a
+castle, two otherwise, one more again on a retained core and one less where an upper storey is timber-framed
+— and an internal partition stays one, so the structural hierarchy is in the geometry rather than in the
+linework.
+
+The thickness is taken **outward**. A room keeps the floor it was cut with, so nothing downstream of the
+composition moves: routes, door approaches, furniture and the audit all still see the plan they were given.
+A wall two ranges share is not thickened at all, which keeps it one wall between them rather than two; nor is
+the wall a range presents to a yard, since that is a face the yard is entered through. A chamfered tower has
+no straight face to take the mass and keeps the shell it was cut with.
+
+Every opening is then cut through the whole thickness, so a door is a passage and a window a reveal rather
+than a hole in the inner face with masonry still standing behind it. The audit checks that: a doorway walled
+up even one block beyond its face is a rejected candidate, not a drawing to be trusted.
+
+## Facades
+
+A window used to be stamped every seven blocks from each room's own corner, the same two-by-two light for a
+pantry as for a great hall, and on an upper storey it fell wherever that floor's rooms happened to divide.
+
+A wall is now divided into **bays** before anything is cut into it. The bay lines come from the range itself —
+a pier at each corner, then an even rhythm at roughly six blocks, or seven for a tower, with heavier piers on
+a castle, wider piers and a coarser spacing on a retained core, and no bay at all inside a chamfered corner.
+The same lines serve every storey, so an upper light stands over the one below rather than over nothing.
+Across the standard set 65% of upper lights now stand over a lower one, against 48% before.
+
+What a bay gets depends on what is behind it. A hall or a chapel takes a tall light and a second tier above
+it where the volume is carried through two storeys; a chamber or a study takes an ordinary one; a store or a
+passage takes a slit, set higher; and in a retained core everything but the showpiece lights is a slit. A bay is refused where the wall is a doorway, where a hearth or an oven
+stands against it as a mass of masonry, where the room behind is a stair, or where the light and a pier
+either side would not all belong to the same room — which is what keeps a window out of a corner pier and
+off an internal division.
+
+Where the bay rhythm and the rooms behind it disagree, they are repaired together rather than one overruling
+the other: a room the rhythm misses, but which has a wall of its own to the outside, takes its light on the
+same wall grid, and a narrow one where a full light will not fit. Sixteen rooms in a 2,600-room survey still
+have an outside wall and no window, against seven before; every other windowless room has no outside wall at
+all, which is a massing question rather than a window one.
+
+A chimney now rises over a fire. Where a hearth or an oven backs onto an outside wall the flue stands against
+that wall and in line with it; only a range whose fires are all internal takes a stack on the first free
+corner instead.
+
+## Articulation: what steps out of line, and why
+
+Every wall ran corner to corner without once stepping out of line, and the only things that ever stood proud
+of one — a chimney, a tower — carried no record of why they did.
+
+`Plan.articulation` is now a list of every place a wall does something other than run straight, each with the
+role it plays and the reason it is there. Whole projecting volumes — a tower, a chapel end, a gatehouse porch
+— carry their role in `ComponentKind` already and are not repeated in it.
+
+- **Bay.** Where a principal room has the ground for it, the wall steps out. The bay's footprint swallows the
+  wall it comes through as well as the space it gives, so that the mass of the range does not eat the room the
+  bay was built to make. The wall is then taken out over the bay's whole interior width and through its whole
+  thickness, leaving the bay's returns as the piers of the arch — the point of a bay is that the room reaches
+  into it. It is lit on three sides, and beyond the wall its own walls stay one block even where the range
+  behind is three: that lightness is what makes it a bay rather than a turret.
+- **Oriel.** The same thing on an upper storey, hanging over open ground. What carries it is drawn rather than
+  assumed — a stepped corbel course under the floor it hangs from — and the storey below shows the overhang
+  dashed, with its corbels and the caption *Oriel over*, instead of a room in mid-air.
+- **Chimney.** The stack over a fire, which was already built but never recorded. Its reason names the fire.
+- **Niche.** The inward case: a recess for a lamp or an image, cut into a wall thick enough to give one away —
+  a castle's, or a retained core's — and stopping well short of daylight.
+- **Jetty.** A whole upper storey oversailing the one below on its joists, which the merchant house has always
+  done and nothing had ever recorded. See *Vertical composition* above.
+
+The role is what the audit checks, so a projection that does not do what it claims is a rejected candidate
+rather than a decoration. A bay must have a floor to stand on, must enclose something, and must open into the
+room it is recorded against; an oriel must have something under it; a niche must be hollow and must *not* go
+through its wall. Nothing is placed over a doorway, over the path from the gate, on a curtain wall, in a
+working yard, or on ground another projection has already taken.
+
+Restraint is the rule. A hall with one bay reads as a hall with a bay; a house where every room has one reads
+as a house with none. The budget is one projection, two past 200 blocks and three past 340, spent on the hall
+first and then on the largest of what is left. Across the 960-setting sweep that comes to 1,183 bays, 367
+oriels and 694 niches: 950 of 960 estates have at least one, the hall gets one in 610 of them, and projections
+account for 1.8% of all rooms.
+
+A bay's seat is furniture like any other, so it is drawn, exported and voxelised with the rest — a bay window
+without a window seat is a corridor with a view.
+
+## The covered walk
+
+A courtyard range's walk used to be a corridor with doors onto the yard, which made the court the gap left
+between the wings rather than the room the house is arranged around.
+
+Where the walk down a range's flank faces a yard, its outer side is now an **arcade**: piers at four blocks
+with the wall taken out between them, so the walk and the court are one space at ground level and you cross a
+courtyard house under cover without ever going through a door. The wall above the piers stays, because what
+makes a loggia a loggia is that it is roofed — the storey over it, or the rafters of a single-storey range.
+Nothing is cut into the arcade wall: the arcade is the opening, so the lights the facade pass would have put
+there are removed.
+
+Seventy covered walks across a 108-plan slice, in 49 of the plans; the courtyard castle has the most of them,
+which is what a quadrangle is for. §10.1 asks for the loggia's condition to be kept explicit alongside the
+court's and the hall's, and it is: `open` is `covered`, not `interior` or `exterior`.
+
 ## The courtyard castle
 
 `courtyard-castle` is the archetype laid out site first. The court is placed before anything else, and the
@@ -140,6 +444,10 @@ The court is a room of the plan rather than a border drawn round it, so ranges a
 and the approach reads as a sequence: **gate passage, court, screens passage, hall.** Nothing is discovered
 by packing rooms and drawing a wall round the result. Below 128 blocks there is not enough ground for a
 quadrangle and the composition falls back to the hall-and-wings massing.
+
+The type is fixed; the castle is not. See *New seeds vary in architecture* above for what the seed chooses
+here — the court's proportion, each range's depth, the height of the gate, and whether the corners carry
+towers.
 
 ## The household, and the site it stands on
 

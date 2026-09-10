@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { candidateCount, generateCandidate, generatePlan, rank, tryGenerate } from './architecture.ts';
-import { compositionReport } from './composition.ts';
-import { DEFAULT_SETTINGS, FAMILIES, insidePolygon, type Settings, type Plan, type Rect } from './model.ts';
+import { bayLines, compositionReport } from './composition.ts';
+import { componentFootprint, DEFAULT_SETTINGS, FAMILIES, insidePolygon, intersects, type Settings, type Plan, type Rect } from './model.ts';
 import { voxelize, prepareMeshes, SparseBlocks } from './voxels.ts';
 import { auditArchitecture } from './architectural-audit.ts';
+import { batchSettings, regressionBatch } from './regression.ts';
 import { accessGraph, transitViolations, isCirculation, routeToRoom, navigationReport, articulationPoints } from './navigation.ts';
 
 export const representatives:Settings[]=(['house','manor','castle'] as const).flatMap(kind=>[128,256].flatMap(size=>[0,1,2].map(i=>({...DEFAULT_SETTINGS,kind,size,seed:`REVIEW-${kind}-${size}-${i}`,family:FAMILIES[kind][i].id}))));
@@ -256,6 +257,73 @@ void test('ordinary rooms keep their proportions: no strip a wing long, nothing 
   assert.ok(worstShape<=3.2,`the longest ordinary room is ${worstShape.toFixed(1)} times its width: ${shape}`);
   assert.ok(worstSize<=760,`the largest ordinary room has taken ${worstSize} blocks: ${size}`);
 });
+void test('an upper storey is accommodation of its own, and a stair comes up into a well that is drawn',()=>{
+  // The defect this answers: every floor above the ground one filled with bedchambers and wardrobes whatever
+  // the range was for, and the hole a stair comes up through left as an unexplained grey gap in the boards.
+  const names=new Map<string,number>();let rooms=0;
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind])for(const size of [128,256]){
+    const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size,floors:4,seed:'ABOVE'});
+    for(const st of p.stairs){
+      const above=p.floors.find(f=>f.elevation===st.toY);
+      // The well is not worked out again by the drawing: it is the reservation the stair took, reaching this level.
+      assert.ok(above?.voids.some(v=>v.kind==='stair'&&intersects(v.bounds,st.bounds)),`${family.id}/${size}: ${st.id} comes up into a floor with no well drawn`);
+      assert.ok(p.reservations.some(v=>v.kind==='stair'&&v.componentId===st.componentId&&intersects(v.bounds,st.bounds)),`${family.id}/${size}: ${st.id} reserved no well`);
+    }
+    // A door onto a well is a fall, and the audit rejects it; every plan returned has already passed that.
+    assert.deepEqual(auditArchitecture(p),[],`${family.id}/${size}: the plan returned does not pass its own audit`);
+    for(const r of p.rooms){
+      if(r.floorY<=0||isCirculation(r))continue;
+      rooms++;const base=r.name.replace(/ \d+$/,'');names.set(base,(names.get(base)??0)+1);
+    }
+  }
+  assert.ok(rooms>300,`only ${rooms} rooms above the ground floor surveyed`);
+  assert.ok(names.size>=24,`only ${names.size} kinds of room above the ground floor`);
+  const commonest=Math.max(...names.values());
+  assert.ok(commonest/rooms<=0.15,`${(100*commonest/rooms).toFixed(0)}% of the rooms above ground are the same room`);
+});
+void test('a wall is divided into bays before anything is cut into it',()=>{
+  // The defect this answers: one window every seven blocks from each room's own corner, the same size for a
+  // pantry as for a great hall, and an upper storey whose lights fell wherever that floor's rooms divided.
+  let windows=0,upper=0,over=0;const forms=new Set<string>();
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    const byId=new Map(p.rooms.map(r=>[r.id,r]));
+    const doors=new Set(p.openings.filter(o=>o.type!=='window').flatMap(o=>
+      Array.from({length:o.width},(_,w)=>`${o.x+(o.axis==='z'?w:0)},${o.z+(o.axis==='x'?w:0)}`)));
+    const bays=new Map<string,number[]>();
+    // A light in a projection stands in the bay's own wall, not in the room's, so the pier rule is not its rule.
+    const projected=(o:{x:number;z:number;width:number;axis:string})=>p.articulation.some(a=>a.role!=='niche'
+      &&Array.from({length:o.width},(_,w)=>({x:o.x+(o.axis==='z'?w:0),z:o.z+(o.axis==='x'?w:0)}))
+        .some(k=>k.x>=a.bounds.x-1&&k.x<=a.bounds.x+a.bounds.w+1&&k.z>=a.bounds.z-1&&k.z<=a.bounds.z+a.bounds.d+1));
+    for(const o of p.openings.filter(o=>o.type==='window')){
+      windows++;forms.add(`${o.width}x${o.height}`);
+      if(projected(o))continue;
+      const room=byId.get(o.roomIds[0])!;
+      const across=o.axis==='z';
+      // A pier either side: the wall cell beyond each end of the light belongs to the same room behind it.
+      for(let w=-1;w<=o.width;w++){
+        const x=across?o.x+w:o.x,z=across?o.z:o.z+w;
+        const inside=across?{x:x+.5,z:z+(z===room.bounds.z?1.5:-.5)}:{x:x+(x===room.bounds.x?1.5:-.5),z:z+.5};
+        assert.ok(insidePolygon(inside.x,inside.z,room.polygon),`${settings.seed}: ${room.name} has a light with no pier beside it`);
+      }
+      for(let w=0;w<o.width;w++)assert.ok(!doors.has(`${o.x+(across?w:0)},${o.z+(across?0:w)}`),`${settings.seed}: a light is cut through a doorway`);
+      // Nothing is cut through a hearth mass.
+      const mass={x:o.x-1,z:o.z-1,w:(across?o.width:1)+2,d:(across?1:o.width)+2};
+      for(const fu of room.furniture)if(fu.type==='hearth'||fu.type==='oven')
+        assert.ok(!intersects(fu,mass),`${settings.seed}: a light is cut through the ${fu.type} in ${room.name}`);
+      // Bays are lines on the range's wall, so a light on one storey stands over the light below it.
+      const c=p.components.find(x=>x.id===room.componentId)!;
+      const along=(across?o.x:o.z)+Math.floor(o.width/2);
+      const near=across?o.z<c.bounds.z+c.bounds.d/2:o.x<c.bounds.x+c.bounds.w/2;
+      const key=`${room.componentId}:${o.axis}:${near?'lo':'hi'}:${along}`;
+      bays.set(key,[...(bays.get(key)??[]),room.floorY]);
+    }
+    for(const [key,levels] of bays)for(const y of levels)if(y>0){upper++;if(levels.some(other=>other<y))over++;void key;}
+  }
+  assert.ok(windows>500,`only ${windows} lights across the standard set`);
+  assert.ok(forms.size>=3,`every light is the same shape: ${[...forms].join(', ')}`);
+  assert.ok(over/Math.max(1,upper)>=0.55,`only ${over} of ${upper} upper lights stand over one below`);
+});
 void test('candidates are ranked on how they stand as well as on how they walk',()=>{
   // The ranker used to return the first candidate with no forced crossing, whatever it looked like, so a
   // composition strung out in a chain of sheds was accepted as readily as a building.
@@ -448,4 +516,339 @@ void test('the courtyard castle is organised by its site: gate, court, hall, ser
   const small=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'courtyard-castle',size:128,floors:3,seed:'SCALE'});
   const large=generatePlan({...DEFAULT_SETTINGS,kind:'castle',family:'courtyard-castle',size:480,floors:3,seed:'SCALE'});
   assert.ok(large.totalArea>small.totalArea*1.5,`480 blocks buys ${large.totalArea} against ${small.totalArea} for 128`);
+});
+
+void test('a retained core is heavier than what was built against it',()=>{
+  // The defect this answers: every range of every seat was the same masonry, the same rhythm and the same
+  // window, because nothing in the plan recorded that a household builds against what is already standing.
+  let inherited=0,single=0,heavier=0,coarser=0;
+  const settings=(['house','manor','castle'] as const).flatMap(kind=>FAMILIES[kind].flatMap(f=>
+    [128,256,384].map(size=>({...DEFAULT_SETTINGS,kind,size,floors:3,seed:`PHASE-${size}`,family:f.id}))));
+  for(const s of settings){
+    const p=generatePlan(s);
+    const tag=`${s.kind}/${s.family}/${s.size}`;
+    // A phase is a fact about every volume, and the builds a plan carries run without a gap.
+    const builds=[...new Set(p.components.map(c=>c.phase))].sort((a,b)=>a-b);
+    assert.ok(builds.every(n=>Number.isInteger(n)&&n>=0),`${tag}: a range belongs to no build`);
+    assert.deepEqual(builds,builds.map((_,i)=>builds[0]+i),`${tag}: the builds skip one: ${builds.join(', ')}`);
+    // Phase 0 is inherited fabric, so it only exists where something was later built against it.
+    const core=p.components.filter(c=>c.phase===0);
+    if(!core.length){single++;continue;}
+    inherited++;
+    assert.ok(p.components.some(c=>c.phase>0),`${tag}: a retained core with nothing standing against it`);
+    // Nothing in a retained core is a timber frame: that is the later builds' lighter construction.
+    const coreIds=new Set(core.map(c=>c.id));
+    const frame=p.blocks.filter(b=>b.material===5&&coreIds.has(b.componentId));
+    assert.equal(frame.length,0,`${tag}: ${frame.length} blocks of framing in the retained core`);
+    // How far a range's masonry is carried outward past the footprint it was cut with.
+    const plain=p.components.filter(c=>c.kind!=='court'&&c.polygon.length===4);
+    const mass=new Map(plain.map(c=>[c.phase,0]));
+    const projecting=p.articulation.filter(a=>a.role!=='niche').map(a=>a.bounds);
+    for(const c of plain){
+      let out=0;
+      for(const b of p.blocks){
+        if(b.componentId!==c.id||b.kind!=='wall')continue;
+        // A bay stands proud of the wall on purpose; it is articulation, not the mass of the wall itself.
+        if(projecting.some(r=>b.x>=r.x-1&&b.x<=r.x+r.w+1&&b.z>=r.z-1&&b.z<=r.z+r.d+1))continue;
+        out=Math.max(out,c.bounds.x-b.x,b.x-(c.bounds.x+c.bounds.w),c.bounds.z-b.z,b.z-(c.bounds.z+c.bounds.d));
+      }
+      mass.set(c.phase,Math.max(mass.get(c.phase)??0,out));
+    }
+    const later=[...mass.entries()].filter(([n])=>n>0).map(([,m])=>m);
+    if(mass.has(0)&&later.length&&mass.get(0)!>Math.max(...later))heavier++;
+    // An older wall carries fewer, more widely spaced openings than the ranges added against it.
+    const rhythms=new Map(p.components.map(c=>[c.phase,bayLines(c,s.kind==='castle').target]));
+    if(rhythms.has(0)&&[...rhythms].some(([n,t])=>n>0&&t<rhythms.get(0)!))coarser++;
+  }
+  assert.ok(inherited>8,`only ${inherited} of ${settings.length} seats keep any inherited fabric`);
+  assert.ok(single>8,`only ${single} of ${settings.length} seats were raised in one campaign`);
+  assert.ok(heavier>=inherited*.8,`only ${heavier} of ${inherited} retained cores are heavier than their later ranges`);
+  assert.ok(coarser>=inherited*.8,`only ${coarser} of ${inherited} retained cores take a coarser rhythm`);
+});
+
+void test('a projection has a reason, and keeps the promise the reason makes',()=>{
+  // The defect this answers: walls that ran corner to corner without once stepping out of line, and the
+  // only things that ever stood proud of one — a chimney, a tower — carrying no record of why they did.
+  let seats=0,arches=0,carried=0,rooms=0,projections=0;
+  for(const settings of representatives){
+    const p=generatePlan(settings);
+    const tag=settings.seed;
+    const grid=voxelize(p);
+    rooms+=p.rooms.length;
+    assert.ok(p.articulation.length,`${tag}: nothing on this estate steps out of line`);
+    for(const a of p.articulation){
+      assert.ok(a.reason.length>10,`${tag}: ${a.role} at ${a.bounds.x},${a.bounds.z} carries no reason`);
+      const c=p.components.find(x=>x.id===a.componentId);
+      assert.ok(c,`${tag}: ${a.role} belongs to no range`);
+      if(a.role==='chimney')continue;
+      if(a.role==='jetty'){
+        // A jetty is an explicit cantilever: a whole storey oversailing, with its joists shown underneath.
+        assert.equal(a.baseY,6,`${tag}: a jetty on floor ${a.baseY/6}`);
+        assert.ok(p.blocks.some(k=>k.kind==='support'&&k.y<a.baseY&&k.y>=a.baseY-2&&k.x<a.bounds.x+a.bounds.w&&k.x+k.w>a.bounds.x&&k.z<a.bounds.z+a.bounds.d&&k.z+k.d>a.bounds.z),
+          `${tag}: the jetty at ${a.bounds.x},${a.bounds.z} oversails on nothing`);
+        continue;
+      }
+      if(a.role==='niche'){
+        // A niche is the inward case: it sits in the wall of its room and stops short of daylight.
+        const room=p.rooms.find(r=>a.roomIds.includes(r.id))!;
+        assert.ok(['hall','sacred','gallery'].includes(room.kind),`${tag}: a niche in the ${room.kind}`);
+        assert.ok(a.bounds.w*a.bounds.d<=2,`${tag}: a niche ${a.bounds.w} by ${a.bounds.d} is a chamber`);
+        continue;
+      }
+      projections++;
+      const room=p.rooms.find(r=>a.roomIds.includes(r.id))!;
+      assert.ok(['hall','gallery','study','bedroom'].includes(room.kind),`${tag}: a bay off the ${room.kind}`);
+      assert.equal(room.floorY>0,a.role==='oriel',`${tag}: ${a.role} on floor ${room.floorY}`);
+      // It stands proud of the range: part of its footprint is outside the walls it comes through.
+      const b=a.bounds;
+      assert.ok(b.x<c!.bounds.x||b.z<c!.bounds.z||b.x+b.w>c!.bounds.x+c!.bounds.w||b.z+b.d>c!.bounds.z+c!.bounds.d,
+        `${tag}: the ${a.role} for ${room.name} does not project`);
+      // It opens into the room it was built for, and there is a way through at head height.
+      let open=false;
+      for(let x=b.x+1;x<b.x+b.w;x++)for(let z=b.z+1;z<b.z+b.d;z++)if(!grid.material(x,a.baseY+2,z))open=true;
+      assert.ok(open,`${tag}: the ${a.role} for ${room.name} is solid`);
+      arches++;
+      // The seat is the point of it, and it is in the projection rather than somewhere in the room.
+      const seat=room.furniture.find(f=>f.type==='seat'&&f.x>=b.x&&f.x<=b.x+b.w&&f.z>=b.z&&f.z<=b.z+b.d);
+      assert.ok(seat,`${tag}: the ${a.role} for ${room.name} has no seat in it`);
+      seats++;
+      if(a.role==='oriel'){
+        // What carries an oriel is drawn on the storey below rather than left to the reader's charity.
+        assert.ok(p.blocks.some(k=>k.kind==='support'&&k.y<a.baseY&&k.x<b.x+b.w&&k.x+k.w>b.x&&k.z<b.z+b.d&&k.z+k.d>b.z),
+          `${tag}: the oriel for ${room.name} hangs on nothing`);
+        carried++;
+      }
+    }
+    // Two projections may not want the same ground, and none may stand on a range.
+    for(let i=0;i<p.articulation.length;i++)for(let j=i+1;j<p.articulation.length;j++){
+      const a=p.articulation[i],b=p.articulation[j];
+      if(a.role==='niche'||b.role==='niche'||a.role==='jetty'||b.role==='jetty')continue;
+      assert.ok(!intersects(a.bounds,b.bounds),`${tag}: the ${a.role} and the ${b.role} want the same ground`);
+    }
+    assert.deepEqual(auditArchitecture(p,grid),[],`${tag}: the audit rejects this plan`);
+  }
+  assert.ok(projections>=representatives.length,`only ${projections} projections across ${representatives.length} estates`);
+  assert.equal(arches,projections);
+  assert.equal(seats,projections);
+  assert.ok(carried>0,'no oriel anywhere, so the overhang convention is never exercised');
+  // Restraint is the rule: repeated ordinary rooms are what make the exceptions read as exceptions.
+  assert.ok(projections/rooms<.05,`${projections} projections for ${rooms} rooms is not restraint`);
+});
+
+void test('the storeys inherit their volumes instead of discovering them',()=>{
+  // The defect this answers: the hall void and the stair well were worked out again by whichever floor was
+  // being drawn, so nothing in the plan said which volumes the storeys owed each other or why.
+  let halls=0,wells=0,yards=0,upper=0,exceptions=0;
+  const settings=(['house','manor','castle'] as const).flatMap(kind=>FAMILIES[kind].flatMap(f=>
+    [128,256,384].map(size=>({...DEFAULT_SETTINGS,kind,size,floors:3,seed:`VOLUME-${size}`,family:f.id}))));
+  for(const s of settings){
+    const p=generatePlan(s);
+    const tag=`${s.kind}/${s.family}/${s.size}`;
+    const hall=p.components.find(c=>c.kind==='hall')!;
+    assert.ok(p.reservations.length,`${tag}: nothing is reserved`);
+    for(const v of p.reservations){
+      assert.ok(v.toY>v.fromY,`${tag}: ${v.name} reserves no height`);
+      assert.ok(v.reason.length>10,`${tag}: ${v.name} carries no reason`);
+      assert.equal(v.open,v.kind==='court'?'exterior':v.kind==='loggia'?'covered':'interior',`${tag}: ${v.kind} is ${v.open}`);
+      assert.ok(p.components.some(c=>c.id===v.componentId),`${tag}: ${v.name} belongs to no range`);
+      if(v.kind==='hall'){halls++;assert.equal(v.componentId,hall.id);assert.equal(v.fromY,6);assert.equal(v.toY,hall.topY);}
+      if(v.kind==='stair')wells++;
+      if(v.kind==='court')yards++;
+      // What stands in a reservation is named by the reservation, not decided by the floor divided last.
+      for(const r of p.rooms.filter(r=>r.floorY>=v.fromY&&r.floorY<v.toY&&intersects(v.bounds,r.bounds))){
+        if(v.kind==='hall'){assert.equal(r.kind,'gallery',`${tag}: ${r.name} stands in ${v.name}`);exceptions++;}
+        if(v.kind==='stair')assert.ok(['stairs','circulation'].includes(r.kind),`${tag}: ${r.name} stands in the stair well`);
+      }
+    }
+    // The drawing does not work a void out for itself: every one is a reservation that reaches that level.
+    for(const floor of p.floors)for(const v of floor.voids)
+      assert.ok(p.reservations.some(res=>res.kind===v.kind&&res.name===v.name&&floor.elevation>=res.fromY&&floor.elevation<res.toY),
+        `${tag}: the void ${v.name} on ${floor.name} answers to no reservation`);
+    // Every occupied upper room is carried: by the storey below it, or by a cantilever that says it is.
+    for(const r of p.rooms){
+      if(r.floorY<=0||r.kind==='court')continue;
+      upper++;
+      const c=p.components.find(x=>x.id===r.componentId)!,under=componentFootprint(c,r.floorY-6,p.family);
+      const inside=r.bounds.x>=under.x&&r.bounds.z>=under.z&&r.bounds.x+r.bounds.w<=under.x+under.w&&r.bounds.z+r.bounds.d<=under.z+under.d;
+      const cantilever=p.articulation.some(a=>(a.role==='jetty'||a.role==='oriel')&&intersects(a.bounds,r.bounds));
+      assert.ok(inside||cantilever,`${tag}: ${r.name} (Y ${r.floorY}) stands over open air`);
+    }
+    assert.deepEqual(auditArchitecture(p),[],`${tag}: the plan does not pass its own audit`);
+  }
+  assert.ok(halls>=settings.length*.9,`only ${halls} of ${settings.length} halls keep their volume`);
+  assert.ok(wells>settings.length,`only ${wells} stair wells reserved across ${settings.length} estates`);
+  assert.ok(yards>0,'no yard is reserved as open exterior anywhere');
+  assert.ok(exceptions>0,'no gallery ever overlooks a hall, so the exception is never exercised');
+  assert.ok(upper>500,`only ${upper} rooms above the ground floor surveyed`);
+});
+
+void test('a hall is a hall: its ends are not interchangeable, and it has more than one form',()=>{
+  // The defect this answers: a hall as wide as it was long, so neither end was an end; the kitchen opening
+  // beside the dais; and one hearth in one place whatever the hall or the household was.
+  const variants=new Set<string>();const ratios:number[]=[];let halls=0,gates=0,ports=0,atServing=0;
+  const settings=(['house','manor','castle'] as const).flatMap(kind=>FAMILIES[kind].flatMap(f=>
+    [128,256,384].map(size=>({...DEFAULT_SETTINGS,kind,size,floors:3,seed:`MOTIF-${size}`,family:f.id}))));
+  for(const s of settings){
+    const p=generatePlan(s);
+    const tag=`${s.kind}/${s.family}/${s.size}`;
+    const hall=p.motifs.find(m=>m.kind==='hall');
+    assert.ok(hall,`${tag}: the hall is not recorded as a hall`);
+    halls++;variants.add(hall!.variant);
+    gates+=p.motifs.filter(m=>m.kind==='gate').length;
+    const body=p.rooms.find(r=>hall!.roomIds.includes(r.id)&&r.kind==='hall')!;
+    const long=Math.max(body.bounds.w,body.bounds.d)-1,short=Math.min(body.bounds.w,body.bounds.d)-1;
+    ratios.push(long/short);
+    assert.ok(long>=short*1.35,`${tag}: the hall is ${long} by ${short}, which has no long axis to have ends on`);
+    // The dais stands at the high end and the screens at the serving end, and they are not the same end.
+    assert.ok(!intersects(hall!.high,hall!.low),`${tag}: the hall's two ends are in the same place`);
+    const dais=body.furniture.find(f=>f.type==='dais');
+    if(dais)assert.ok(dais.z>=hall!.high.z-1&&dais.z+dais.d<=hall!.high.z+hall!.high.d+1
+      &&dais.x>=hall!.high.x-1&&dais.x+dais.w<=hall!.high.x+hall!.high.w+1,`${tag}: the dais is not at the high end`);
+    const screens=p.rooms.find(r=>hall!.roomIds.includes(r.id)&&r.kind==='circulation');
+    assert.ok(screens,`${tag}: the hall has no screens passage`);
+    // A hall has a fire, and where it stands is a choice with consequences: a louver or a stack, not both.
+    const fire=body.furniture.find(f=>f.type==='hearth');
+    assert.ok(fire,`${tag}: the hall has no fire`);
+    const central=fire!.x>body.bounds.x+2&&fire!.x+fire!.w<body.bounds.x+body.bounds.w-2;
+    assert.equal(central,hall!.variant.startsWith('open-hearth'),`${tag}: the variant and the hearth disagree`);
+    if(central)assert.ok(!p.chimneys.some(c=>c.componentId===hall!.componentId),`${tag}: an open hearth with a stack over it`);
+    // The service doors belong at the serving end: dinner does not come past the dais.
+    for(const port of hall!.ports){
+      ports++;
+      const o=p.openings.find(x=>x.id===port.openingId)!;
+      const along=hall!.axis==='z'?o.z:o.x;
+      const hi=hall!.axis==='z'?hall!.high.z+hall!.high.d:hall!.high.x+hall!.high.w;
+      const lo=hall!.axis==='z'?hall!.high.z:hall!.high.x;
+      if(port.role==='service'&&(along<lo-1||along>hi+1))atServing++;
+      else if(port.role!=='service')atServing++;
+    }
+  }
+  assert.ok(variants.size>=3,`the hall is raised in only ${variants.size} forms: ${[...variants].join(', ')}`);
+  assert.ok(gates>=halls*.7,`only ${gates} gate motifs for ${halls} halls`);
+  ratios.sort((a,b)=>a-b);
+  assert.ok(ratios[Math.floor(ratios.length/2)]>=1.6,`the median hall is ${ratios[Math.floor(ratios.length/2)].toFixed(2)}:1`);
+  assert.ok(atServing/ports>=.95,`only ${atServing} of ${ports} hall doors are at the end they belong to`);
+});
+void test('new seeds vary in architecture, not only in labels or in which way round it is',()=>{
+  // The defect this answers: a courtyard castle whose every dimension came off the site budget, so sixty
+  // seeds raised the same castle sixty times over. What counts as a difference here is what a reader would
+  // see with the labels off: the kinds of volume, their proportions and their heights — never a mirror.
+  const shape=(c:{bounds:Rect;kind:string;storeys:number})=>{
+    const long=Math.max(c.bounds.w,c.bounds.d),short=Math.min(c.bounds.w,c.bounds.d);
+    return `${c.kind}:${long>=short*1.7?'range':long>=short*1.25?'block':'square'}:${c.storeys}`;
+  };
+  let worst=Infinity,worstFamily='';
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind]){
+    const massings=new Map<string,number>();
+    const N=24;
+    for(let i=0;i<N;i++){
+      const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size:256,floors:3,seed:`SEEDS-${i}`});
+      const key=p.components.map(shape).sort().join('|');
+      massings.set(key,(massings.get(key)??0)+1);
+    }
+    const share=massings.size/N;
+    if(share<worst){worst=share;worstFamily=family.id;}
+    assert.ok(massings.size>=N*.33,`${family.id}: only ${massings.size} distinct massings in ${N} seeds`);
+    assert.ok(Math.max(...massings.values())<=N*.4,`${family.id}: ${Math.max(...massings.values())} of ${N} seeds raise the same massing`);
+  }
+  assert.ok(worst>=.33,`${worstFamily} is the least varied at ${(worst*100).toFixed(0)}%`);
+});
+
+void test('the correctness cases: a strip is rejected, a gallery is not, and a yard keeps its sky',()=>{
+  // The defect this answers: rules that lived only in the stage that placed something, so a later stage
+  // could undo them and nothing would say so.
+  const p=generatePlan({...DEFAULT_SETTINGS,kind:'manor',family:'accumulated-estate',size:320,floors:3,seed:'CASES'});
+  const clean=auditArchitecture(p);
+  assert.deepEqual([...clean],[],'the plan does not pass its own audit');
+  // An ordinary room forced into a strip is rejected, and not by renaming it.
+  const strip=structuredClone(p),victim=strip.rooms.find(r=>r.kind==='bedroom')!;
+  victim.bounds={...victim.bounds,w:5,d:5+Math.ceil(4*4)};
+  assert.ok(auditArchitecture(strip).some(i=>i.includes(victim.name)&&i.includes('strip')),'a 4:1 chamber is accepted');
+  // A genuine long gallery is not: its own kind has its own proportions.
+  const galleries=p.rooms.filter(r=>r.kind==='gallery'||r.kind==='circulation');
+  const long=galleries.filter(r=>Math.max(r.bounds.w,r.bounds.d)>Math.min(r.bounds.w,r.bounds.d)*4);
+  assert.ok(long.length,'no long connector anywhere to test the gallery case against');
+  for(const g of long)assert.ok(!clean.some(i=>i.includes(g.name)),`${g.name} is rejected for being long`);
+  // A courtyard marked open exterior carries no floor or roof across it but an eave.
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind]){
+    const seed='SKY-0';
+    const q=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size:288,floors:3,seed});
+    for(const v of q.reservations.filter(v=>v.kind==='court')){
+      const b=v.bounds,inner={x:b.x+2,z:b.z+2,w:b.w-4,d:b.d-4};
+      if(inner.w<=0||inner.d<=0)continue;
+      const lid=q.blocks.find(k=>(k.kind==='roof'||k.kind==='floor')&&k.y>=v.fromY&&k.y<v.toY&&intersects(k,inner));
+      assert.ok(!lid,`${family.id}/${seed}: ${v.name} has ${lid?.kind} over it at Y ${lid?.y}`);
+    }
+    // A bay may not eat the room it came out of.
+    for(const a of q.articulation.filter(a=>a.role==='bay'||a.role==='oriel')){
+      const host=q.rooms.find(r=>a.roomIds.includes(r.id))!;
+      const across=a.side==='n'||a.side==='s';
+      assert.ok((across?a.bounds.w:a.bounds.d)*2<=(across?host.bounds.w:host.bounds.d),`${family.id}/${seed}: the ${a.role} leaves ${host.name} no core`);
+    }
+  }
+  // A formal quadrangle is not marked down for being regular: symmetry is a composition, not a defect.
+  const score=(family:Settings['family'],kind:Settings['kind'])=>[0,1,2]
+    .map(i=>generatePlan({...DEFAULT_SETTINGS,kind,family,size:320,floors:3,seed:`FORMAL-${i}`}).composition.score)
+    .reduce((a,b)=>a+b,0)/3;
+  const formal=(score('courtyard-castle','castle')+score('palace','castle')+score('courtyard-manor','manor'))/3;
+  const loose=(score('accumulated-estate','manor')+score('keep-bailey','castle')+score('annex-house','house'))/3;
+  assert.ok(formal>=loose-5,`the formal profiles score ${formal.toFixed(0)} against ${loose.toFixed(0)} for the loose ones`);
+});
+void test('the fixed-seed batch reports accepted-plan validity and search success apart',()=>{
+  // The defect this answers: one number that mixed how often the engine found a plan with whether the plans
+  // it found were sound, so a run that quietly returned broken geometry looked like a run that gave up.
+  assert.deepEqual(batchSettings(41),batchSettings(41),'the batch is not a fixed suite');
+  const spread=new Set(Array.from({length:120},(_,i)=>`${batchSettings(i).kind}/${batchSettings(i).family}/${batchSettings(i).size}/${batchSettings(i).floors}`));
+  assert.ok(spread.size>=100,`120 indices of the batch cover only ${spread.size} distinct settings`);
+  const out=regressionBatch(96);
+  assert.deepEqual(out.invalid.map(b=>`${b.settings} ${b.issues[0]}`),[],'the batch returned plans it calls valid that are not');
+  assert.ok(out.found>=out.settings*.95,`search found a plan for only ${out.found} of ${out.settings}: ${out.failures.slice(0,3).map(f=>f.reason).join('; ')}`);
+  assert.ok(out.meanNavigation>70&&out.meanComposition>70,`mean navigability ${out.meanNavigation}, mean composition ${out.meanComposition}`);
+});
+
+void test('a covered walk is open to the yard it serves',()=>{
+  // The defect this answers: a courtyard range whose walk was a corridor with doors onto the yard, so the
+  // court was the gap between the wings rather than the room the house was arranged around.
+  let loggias=0,plans=0,withOne=0;
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind])for(const seed of ['ARCADE-0','ARCADE-1']){
+    const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size:320,floors:3,seed});
+    const tag=`${family.id}/${seed}`;
+    plans++;
+    const grid=voxelize(p);
+    const here=p.reservations.filter(v=>v.kind==='loggia');
+    if(here.length)withOne++;
+    for(const v of here){
+      loggias++;
+      assert.equal(v.open,'covered',`${tag}: a loggia recorded as ${v.open}`);
+      assert.ok(v.side,`${tag}: ${v.name} is open on no particular side`);
+      // It is covered: something stands over it somewhere in the roof above.
+      const mid={x:v.bounds.x+Math.floor(v.bounds.w/2),z:v.bounds.z+Math.floor(v.bounds.d/2)};
+      let covered=false;
+      for(let y=v.toY;y<=v.toY+14&&!covered;y++)if(grid.material(mid.x,y,mid.z))covered=true;
+      assert.ok(covered,`${tag}: ${v.name} has nothing over it`);
+      // It is open: most of its outer side is arcade rather than wall, and it faces a yard.
+      const across=v.side==='n'||v.side==='s';
+      const b=v.bounds,edge=v.side==='n'?b.z:v.side==='s'?b.z+b.d:v.side==='w'?b.x:b.x+b.w;
+      const from=across?b.x:b.z,run=across?b.w:b.d;
+      let open=0;
+      for(let i=1;i<run;i++)if(!grid.material(across?from+i:edge,v.fromY+2,across?edge:from+i))open++;
+      assert.ok(open*2>=run,`${tag}: ${v.name} is open along ${open} of ${run} blocks`);
+      // Piers still stand between the bays: an arcade is not an absent wall.
+      let piers=0;
+      for(let i=0;i<=run;i+=4)if(grid.material(across?from+i:edge,v.fromY+2,across?edge:from+i))piers++;
+      assert.ok(piers>=2,`${tag}: ${v.name} has ${piers} piers, so its wall is simply missing`);
+      // Nothing is cut into the arcade: the arcade is the opening.
+      for(const o of p.openings.filter(o=>o.type==='window')){
+        const cells=Array.from({length:o.width},(_,w)=>({x:o.x+(o.axis==='z'?w:0),z:o.z+(o.axis==='x'?w:0)}));
+        const inWall=cells.some(c=>(across?c.z===edge&&c.x>from&&c.x<from+run:c.x===edge&&c.z>from&&c.z<from+run));
+        assert.ok(!inWall,`${tag}: a light is cut into the arcade of ${v.name}`);
+      }
+      // Only the walk itself stands in it.
+      for(const r of p.rooms.filter(r=>r.floorY>=v.fromY&&r.floorY<v.toY&&intersects(v.bounds,r.bounds)))
+        assert.equal(r.kind,'circulation',`${tag}: ${r.name} stands in ${v.name}`);
+    }
+    assert.deepEqual(auditArchitecture(p,grid),[],`${tag}: the plan does not pass its own audit`);
+  }
+  assert.ok(loggias>=plans*.4,`only ${loggias} covered walks across ${plans} estates`);
+  assert.ok(withOne>=plans*.3,`only ${withOne} of ${plans} estates have one at all`);
 });
