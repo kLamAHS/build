@@ -5,7 +5,7 @@ export const CHUNK_SIZE=16;
 const KINDS:BlockKind[]=['air','wall','floor','roof','stair','support','furniture','ground','glass','chimney'];
 export type LayerRun={x:number;z:number;length:number;material:number;kind:BlockKind};
 export type BlockLayer={y:number;runs:LayerRun[];counts:Record<number,number>;bounds:Plan['bounds']};
-export type MeshData={key:string;material:number;color?:string;roof:boolean;floor:number;positions:Float32Array;normals:Float32Array;indices:Uint32Array};
+export type MeshData={key:string;material:number;color?:string;emissive?:string;roof:boolean;floor:number;positions:Float32Array;normals:Float32Array;indices:Uint32Array};
 const key=(x:number,y:number,z:number)=>`${x},${y},${z}`;
 const index=(x:number,y:number,z:number)=>x+16*(z+16*y);
 
@@ -13,11 +13,11 @@ const index=(x:number,y:number,z:number)=>x+16*(z+16*y);
 export class SparseBlocks {
   chunks=new Map<string,Uint16Array>();
   states=new Map<string,BlockState>();
+  detailVersion?:number;
   bounds:Plan['bounds'];
   constructor(bounds:Plan['bounds']) {this.bounds={...bounds};}
   get(x:number,y:number,z:number){const cx=Math.floor(x/16),cy=Math.floor(y/16),cz=Math.floor(z/16);return this.chunks.get(key(cx,cy,cz))?.[index(x-cx*16,y-cy*16,z-cz*16)]||0;}
   material(x:number,y:number,z:number){return this.get(x,y,z)&15;}
-  /** What the cell is for, as distinct from what it is made of: a glass pane and a window are both glass. */
   kindAt(x:number,y:number,z:number):BlockKind{const v=this.get(x,y,z);return v?KINDS[(v>>4)&15]:'air';}
   stateAt(x:number,y:number,z:number){return this.states.get(key(x,y,z));}
   setState(x:number,y:number,z:number,state:BlockState){
@@ -60,9 +60,9 @@ export class SparseBlocks {
   stats(){let blocks=0;for(const chunk of this.chunks.values())for(const v of chunk)if(v)blocks++;return {blocks,chunks:this.chunks.size,bytes:this.chunks.size*8192};}
 }
 /** Structural voxelization stays unchanged: audits and floor outlines do not depend on facade decoration. */
-export function voxelize(plan:Plan){const grid=new SparseBlocks(plan.bounds);for(const box of plan.blocks){const component=plan.components.find(c=>c.id===box.componentId);grid.apply(box.kind==='roof'?{...box,ownerFloor:component?Math.floor(component.topY/6)-1:Math.floor(box.y/6)}:box);}return grid;}
+export function voxelize(plan:Plan){const grid=new SparseBlocks(plan.bounds),components=new Map(plan.components.map(c=>[c.id,c]));for(const box of plan.blocks){const component=components.get(box.componentId);grid.apply(box.kind==='roof'?{...box,ownerFloor:component?Math.floor(component.topY/6)-1:Math.floor(box.y/6)}:box);}return grid;}
 
-type Acc={material:number;color?:string;roof:boolean;floor:number;p:number[];n:number[];i:number[]};
+type Acc={material:number;color?:string;emissive?:string;roof:boolean;floor:number;p:number[];n:number[];i:number[]};
 const roofOf=(value:number)=>((value>>4)&15)===3;
 const floorOf=(value:number,y:number)=>roofOf(value)?(value>>8)-8:Math.floor(y/6);
 // Keep both sides of interfaces that are separated by roof hiding or floor explosion.
@@ -82,7 +82,6 @@ function rectangles(mask:Int32Array,size:number,emit:(i:number,j:number,w:number
     emit(i,j,width,height,value);i+=width;
   }
 }
-const FULL=new Uint8Array(64).fill(1);
 /** Greedy full-block faces plus exact quarter-block stair/slab/post faces. Export uses these same states. */
 export function prepareMeshes(grid:SparseBlocks):MeshData[]{
   const groups=new Map<string,Acc>(),ids=new Map<string,number>(),byId:Acc[]=[];
@@ -101,10 +100,10 @@ export function prepareMeshes(grid:SparseBlocks):MeshData[]{
     return nearCells?.[index(x-cx*16,y-cy*16,z-cz*16)];
   };
   const group=(value:number,y:number,state?:BlockState)=>{
-    const material=value&15,roof=roofOf(value),floor=floorOf(value,y),k=`${material}/${+roof}/${floor}/${state?.key??''}`;
-    let id=ids.get(k);if(id===undefined){id=byId.length+1;ids.set(k,id);const g:Acc={material,roof,floor,...(state?{color:state.color}:{}),p:[],n:[],i:[]};groups.set(k,g);byId.push(g);}return id;
+    const material=value&15,roof=roofOf(value),floor=floorOf(value,y),k=`${material}/${+roof}/${floor}/${state?.color??''}/${state?.emissive??''}`;
+    let id=ids.get(k);if(id===undefined){id=byId.length+1;ids.set(k,id);const g:Acc={material,roof,floor,...(state?{color:state.color,emissive:state.emissive}:{}),p:[],n:[],i:[]};groups.set(k,g);byId.push(g);}return id;
   };
-  const mask=new Int32Array(256),interfaceMask=new Int32Array(16),coords=[0,0,0];
+  const mask=new Int32Array(256),coords=[0,0,0];
   for(const [chunkKey,chunk] of grid.chunks){
     const origin=chunkKey.split(',').map(n=>Number(n)*16);
     for(let axis=0;axis<3;axis++)for(const sign of [-1,1]){
@@ -118,13 +117,14 @@ export function prepareMeshes(grid:SparseBlocks):MeshData[]{
           if(state?.occupancy)continue;
           const nx=x+(axis===0?sign:0),ny=y+(axis===1?sign:0),nz=z+(axis===2?sign:0),other=grid.get(nx,ny,nz);
           if(other&&samePart(value,y,other,ny)){
-            const shape=stateAt(nx,ny,nz)?.occupancy;if(!shape)continue;
-            const g=byId[group(value,y,state)-1];interfaceMask.fill(0);
-            for(let jj=0;jj<4;jj++)for(let ii=0;ii<4;ii++){
-              const c=[0,0,0];c[axis]=sign>0?0:3;c[u]=ii;c[v]=jj;
-              if(!shape[c[0]+4*(c[2]+4*c[1])])interfaceMask[ii+jj*4]=1;
+            const neighbor=stateAt(nx,ny,nz),shape=neighbor?.occupancy;if(!shape)continue;
+            const n=neighbor?.resolution??4,interfaceMask=new Int32Array(n*n);
+            const g=byId[group(value,y,state)-1];
+            for(let jj=0;jj<n;jj++)for(let ii=0;ii<n;ii++){
+              const c=[0,0,0];c[axis]=sign>0?0:n-1;c[u]=ii;c[v]=jj;
+              if(!shape[c[0]+n*(c[2]+n*c[1])])interfaceMask[ii+jj*n]=1;
             }
-            rectangles(interfaceMask,4,(ii,jj,w,h)=>{const start=[x,y,z];start[axis]+=sign>0?1:0;start[u]+=ii/4;start[v]+=jj/4;quad(g,start,axis,sign,w/4,h/4);});
+            rectangles(interfaceMask,n,(ii,jj,w,h)=>{const start=[x,y,z];start[axis]+=sign>0?1:0;start[u]+=ii/n;start[v]+=jj/n;quad(g,start,axis,sign,w/n,h/n);});
             continue;
           }
           mask[i+j*16]=group(value,y,state);
@@ -133,38 +133,55 @@ export function prepareMeshes(grid:SparseBlocks):MeshData[]{
       }
     }
   }
-  // Shaped blocks have 4x4x4 occupancy. Cull within each state and against neighbouring cells, across chunks too.
-  const smallMask=new Int32Array(16);
+  // Resolve each shaped block at its own precision, promoted at mixed-resolution seams.
+  // Only the six face neighbours are ever consulted, and each is asked about up to 256 times: read each one
+  // once per block, into buffers that are reused rather than reallocated for every stair and slab.
+  const masks=new Map<number,Int32Array>(),cursor=[0,0,0];
+  const nearValue=new Int32Array(6),nearStamp=new Int32Array(6).fill(-1),nearState:(BlockState|undefined)[]=[];
+  let stamp=0;
   for(const [k,state] of grid.states){
     if(!state.occupancy)continue;
     const origin=k.split(',').map(Number),value=grid.get(origin[0],origin[1],origin[2]);if(!value)continue;
-    const g=byId[group(value,origin[1],state)-1];
-    // One lookup per neighbouring cell, not one per quarter-block face: the same 4x4 grid asks sixteen times.
-    const near=Array.from<Uint8Array|null|undefined>({length:27});
-    const occupiedAt=(x:number,y:number,z:number)=>{
-      if(x>=0&&x<4&&y>=0&&y<4&&z>=0&&z<4)return !!state.occupancy![x+4*(z+4*y)];
-      const bx=Math.floor(x/4),by=Math.floor(y/4),bz=Math.floor(z/4),slot=bx+1+3*(bz+1+3*(by+1));
-      let shape=near[slot];
-      if(shape===undefined){
-        const nx=origin[0]+bx,ny=origin[1]+by,nz=origin[2]+bz,other=grid.get(nx,ny,nz);
-        shape=near[slot]=!other||!samePart(value,origin[1],other,ny)?null:stateAt(nx,ny,nz)?.occupancy??FULL;
+    const own=state.resolution??4;
+    stamp++;
+    const slotOf=(bx:number,by:number,bz:number)=>bx<0?0:bx>0?1:by<0?2:by>0?3:bz<0?4:5;
+    const readNear=(bx:number,by:number,bz:number)=>{
+      const slot=slotOf(bx,by,bz);
+      if(nearStamp[slot]!==stamp){
+        const nx=origin[0]+bx,ny=origin[1]+by,nz=origin[2]+bz;
+        nearStamp[slot]=stamp;nearValue[slot]=grid.get(nx,ny,nz);nearState[slot]=stateAt(nx,ny,nz);
       }
-      return !!shape&&!!shape[(x-bx*4)+4*((z-bz*4)+4*(y-by*4))];
+      return slot;
+    };
+    const g=byId[group(value,origin[1],state)-1],shape=state.occupancy;
+    // Sub-block occupancy is asked millions of times per estate, so nothing in here allocates.
+    const occupiedAt=(n:number,x:number,y:number,z:number)=>{
+      if(x>=0&&x<n&&y>=0&&y<n&&z>=0&&z<n)
+        return !!shape[Math.floor(x*own/n)+own*(Math.floor(z*own/n)+own*Math.floor(y*own/n))];
+      const bx=Math.floor(x/n),by=Math.floor(y/n),bz=Math.floor(z/n),slot=readNear(bx,by,bz);
+      if(!nearValue[slot]||!samePart(value,origin[1],nearValue[slot],origin[1]+by))return false;
+      const other=nearState[slot]?.occupancy,ns=nearState[slot]?.resolution??4;
+      return !other||!!other[Math.floor((x-bx*n)*ns/n)+ns*(Math.floor((z-bz*n)*ns/n)+ns*Math.floor((y-by*n)*ns/n))];
     };
     for(let axis=0;axis<3;axis++)for(const sign of [-1,1]){
+      // Only the face that meets a finer neighbour is resolved on the finer neighbour's grid; the other five
+      // stay on this block's own. Promoting all six would cost a chain's neighbours sixty-four times over.
+      cursor[0]=cursor[1]=cursor[2]=0;cursor[axis]=sign;
+      const n=Math.max(own,nearState[readNear(cursor[0],cursor[1],cursor[2])]?.resolution??4);
+      let smallMask=masks.get(n);if(!smallMask){smallMask=new Int32Array(n*n);masks.set(n,smallMask);}
       const u=(axis+1)%3,v=(axis+2)%3;
-      for(let plane=0;plane<4;plane++){
+      for(let plane=0;plane<n;plane++){
         smallMask.fill(0);
-        for(let j=0;j<4;j++)for(let i=0;i<4;i++){
-          const c=[0,0,0];c[axis]=plane;c[u]=i;c[v]=j;
-          if(!occupiedAt(c[0],c[1],c[2]))continue;c[axis]+=sign;
-          if(!occupiedAt(c[0],c[1],c[2]))smallMask[i+j*4]=1;
+        for(let j=0;j<n;j++)for(let i=0;i<n;i++){
+          cursor[axis]=plane;cursor[u]=i;cursor[v]=j;
+          if(!occupiedAt(n,cursor[0],cursor[1],cursor[2]))continue;cursor[axis]+=sign;
+          if(!occupiedAt(n,cursor[0],cursor[1],cursor[2]))smallMask[i+j*n]=1;
         }
-        rectangles(smallMask,4,(i,j,w,h)=>{const start=[...origin];start[axis]+=(plane+(sign>0?1:0))/4;start[u]+=i/4;start[v]+=j/4;quad(g,start,axis,sign,w/4,h/4);});
+        rectangles(smallMask,n,(i,j,w,h)=>{const start=[...origin];start[axis]+=(plane+(sign>0?1:0))/n;start[u]+=i/n;start[v]+=j/n;quad(g,start,axis,sign,w/n,h/n);});
       }
     }
   }
-  return [...groups].filter(([,g])=>g.i.length).map(([key,g])=>({key,material:g.material,...(g.color?{color:g.color}:{}),roof:g.roof,floor:g.floor,positions:new Float32Array(g.p),normals:new Float32Array(g.n),indices:new Uint32Array(g.i)}));
+  return [...groups].filter(([,g])=>g.i.length).map(([key,g])=>({key,material:g.material,...(g.color?{color:g.color}:{}),...(g.emissive?{emissive:g.emissive}:{}),roof:g.roof,floor:g.floor,positions:new Float32Array(g.p),normals:new Float32Array(g.n),indices:new Uint32Array(g.i)}));
 }
 export function layerSvg(layer:BlockLayer,previous?:BlockLayer){
   const {bounds:b,y}=layer,legend=Object.entries(layer.counts).map(([id,count])=>`${MATERIALS[+id].name}: ${count}`).join(' · ');

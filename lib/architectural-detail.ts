@@ -1,20 +1,11 @@
 import { componentFootprint, insidePolygon, type BlockBox, type BuildingComponent, type Plan, type Point, type Rect } from './model.ts';
 import { SparseBlocks, voxelize } from './voxels.ts';
-import { blockState, pane, solid, slab, stair, timber, wallPost, opposite, type BlockState, type Facing } from './block-states.ts';
+import { solid, slab, stair, timber, wallPost, opposite, type BlockState, type Facing } from './block-states.ts';
 
+import { buildTowerCrown, enrichArchitecture } from './architectural-language.ts';
+import { furnishInteriors } from './architectural-furnishings.ts';
+import type { DetailContext, DetailFeature } from './detail-context.ts';
 export const DETAIL_VERSION = 2;
-/**
- * The stone a build of each kind is made of, commonest first. Two hand-built castles read block by block use
- * between twelve and thirty-five stones, and not as salt and pepper: a neighbouring block is the same one
- * about half the time, where random mixing would be a twelfth. So the stone comes from a patchy field of
- * these, three blocks across and two courses tall. Every name here exists in Java 1.16.5, which is the
- * version the schematic writer claims: a block the client does not know pastes as air.
- */
-const STONES: Record<Plan['settings']['kind'], string[]> = {
-  castle: ['stone_bricks', 'cracked_stone_bricks', 'andesite', 'stone', 'cobblestone', 'polished_andesite', 'mossy_stone_bricks', 'gravel'],
-  manor: ['stone_bricks', 'andesite', 'polished_andesite', 'stone', 'cracked_stone_bricks', 'diorite', 'cobblestone', 'granite'],
-  house: ['cobblestone', 'stone', 'andesite', 'mossy_cobblestone', 'stone_bricks', 'granite', 'diorite', 'gravel'],
-};
 const directions: { dx: number; dz: number; facing: Facing }[] = [
   { dx: 0, dz: -1, facing: 'north' }, { dx: 0, dz: 1, facing: 'south' },
   { dx: -1, dz: 0, facing: 'west' }, { dx: 1, dz: 0, facing: 'east' },
@@ -60,9 +51,10 @@ function primaryRoof(box: BlockBox, c: BuildingComponent): boolean {
  * Rooms, openings, stairs, reservations, signature and source boxes are never mutated.
  * Both the viewer worker and whole-building export call this function.
  */
-export function buildDetailedModel(plan: Plan): { grid: SparseBlocks; structure: SparseBlocks; minY: number; maxY: number } {
-  const structure = voxelize(plan), grid = new SparseBlocks(plan.bounds);
+export function buildDetailedModel(plan: Plan, source?:SparseBlocks): { grid: SparseBlocks; structure: SparseBlocks; minY: number; maxY: number; features: DetailFeature[] } {
+  const structure = source??voxelize(plan), grid = new SparseBlocks(plan.bounds);
   for (const [k, chunk] of structure.chunks) grid.chunks.set(k, chunk.slice());
+  for(const [k,state] of structure.states)grid.states.set(k,state);
   const castle = plan.settings.kind === 'castle', seed = hash(plan.settings.seed);
   const components = new Map(plan.components.map(c => [c.id, c]));
   const shell = (c: BuildingComponent) => (castle ? 3 : 2) + (c.phase === 0 ? 1 : 0);
@@ -96,13 +88,10 @@ export function buildDetailedModel(plan: Plan): { grid: SparseBlocks; structure:
     test: (x, y, z) => y >= b.y && y < b.y + b.h && x >= b.x && x < b.x + b.w
       && z >= b.z && z < b.z + b.d && !structure.get(x, y, z),
   });
-  // Kept as their own list as well: a lantern hung in a doorway is worse than a room left dark.
-  const doorways: Guard[] = [];
   for (const o of plan.openings) {
     const depth = 8, alongX = o.axis === 'z';
     const bounds = { x: o.x - (alongX ? 0 : depth), z: o.z - (alongX ? depth : 0), w: alongX ? o.width - 1 : depth * 2, d: alongX ? depth * 2 : o.width - 1 };
-    const g: Guard = { bounds, test: (x, y, z) => y >= o.y && y < o.y + o.height && within(bounds, x, z) };
-    doorways.push(g); guard(g);
+    guard({ bounds, test: (x, y, z) => y >= o.y && y < o.y + o.height && within(bounds, x, z) });
   }
   for (const court of plan.courts) {
     const bounds = { x: court.gate.x - 3, z: court.gatehouse.z - 5, w: 6, d: court.gatehouse.d + 10 };
@@ -124,6 +113,7 @@ export function buildDetailedModel(plan: Plan): { grid: SparseBlocks; structure:
       if (grid.kindAt(x, y, z) === 'roof' && grid.material(x, y, z) === b.material)
         grid.apply({ x, y, z, w: 1, h: 1, d: 1, material: 0, kind: 'air', componentId: c.id });
   }
+  const features:DetailFeature[]=[],context:DetailContext={plan,grid,structure,protectedAt,put,features};
   const roofTile = (facing: Facing) => stair('polished_blackstone_brick_stairs', facing);
   const stone = solid('stone_bricks'), dark = solid('polished_blackstone_bricks');
   // Lower roofs first; the taller range owns an intersection. Nothing replaces a structural wall or a room.
@@ -156,30 +146,7 @@ export function buildDetailedModel(plan: Plan): { grid: SparseBlocks; structure:
       });
       continue;
     }
-    if (c.roof === 'pyramid') {
-      const left = b.x - overhang, right = b.x + b.w + overhang, front = b.z - overhang, back = b.z + b.d + overhang;
-      const chamfer = c.polygon.length > 4 ? Math.max(2, Math.floor(Math.min(b.w, b.d) / 5)) : 0;
-      let apex = c.topY;
-      for (let z = front; z <= back; z++) for (let x = left; x <= right; x++) {
-        const dx = Math.min(x - left, right - x), dz = Math.min(z - front, back - z);
-        const distance = chamfer ? Math.min(dx, dz, Math.floor((dx + dz - chamfer) / 2)) : Math.min(dx, dz);
-        if (distance < 0) continue;
-        const rise = distance + (c.kind === 'tower' ? Math.max(0, distance - 2) : 0);
-        const y = c.topY + rise, facing: Facing = dx < dz ? (x < (left + right) / 2 ? 'east' : 'west') : (z < (front + back) / 2 ? 'south' : 'north');
-        put(x, y, z, dx === dz ? dark : roofTile(facing), 3, 'roof', c, true);
-        if (c.kind === 'tower' && distance > 2) put(x, y - 1, z, dark, 3, 'roof', c, true);
-        if (rise === 0) put(x, y - 1, z, slab(castle ? 'stone_brick_slab' : 'spruce_slab', 'top'), castle ? 1 : 2, 'roof', c);
-        apex = Math.max(apex, y);
-      }
-      const x = Math.floor((left + right) / 2), z = Math.floor((front + back) / 2);
-      // A finial is capped on a solid, supported ridge block, never suspended above a half slab.
-      if (grid.kindAt(x, apex, z) === 'roof') {
-        put(x, apex + 1, z, dark, 3, 'roof', c);
-        put(x, apex + 2, z, wallPost('polished_blackstone_brick_wall'), 3, 'roof', c);
-        put(x, apex + 3, z, slab('polished_blackstone_brick_slab'), 3, 'roof', c);
-      }
-      continue;
-    }
+    if (c.roof === 'pyramid') { buildTowerCrown(context,c); continue; }
     const alongX = c.roof === 'gable-x';
     const cross0 = (alongX ? b.z : b.x) - overhang, cross1 = (alongX ? b.z + b.d : b.x + b.w) + overhang;
     const along0 = (alongX ? b.x : b.z) - overhang, along1 = (alongX ? b.x + b.w : b.z + b.d) + overhang;
@@ -190,6 +157,7 @@ export function buildDetailedModel(plan: Plan): { grid: SparseBlocks; structure:
       const facing: Facing = alongX ? (across <= ridge ? 'south' : 'north') : (across <= ridge ? 'east' : 'west');
       const verge = along === along0 || along === along1;
       const tile = verge ? stair(castle ? 'stone_brick_stairs' : 'spruce_stairs', facing) : roofTile(facing);
+      put(x, y-1, z, dark, 3, 'roof', c, true);
       put(x, y, z, tile, verge ? (castle ? 1 : 2) : 3, 'roof', c, true);
       if (across === cross0 || across === cross1)
         put(x, y - 1, z, slab(castle ? 'stone_brick_slab' : 'spruce_slab', 'top'), castle ? 1 : 2, 'roof', c);
@@ -209,28 +177,14 @@ export function buildDetailedModel(plan: Plan): { grid: SparseBlocks; structure:
   }
 
   // Texture belongs to masonry courses and coherent patches, not independent confetti on every cube.
-  const stones = STONES[plan.settings.kind].map(solid), damp = solid(castle ? 'mossy_stone_bricks' : 'mossy_cobblestone');
-  const boards = [solid('dark_oak_planks'), solid('spruce_planks')], flags = [solid('andesite'), solid('cobblestone')];
+  const variants = [stone, solid('andesite'), solid('cracked_stone_bricks'), solid('mossy_stone_bricks')];
   grid.forEach((x, y, z, value) => {
     const kind = grid.kindAt(x, y, z), material = value & 15;
     if (grid.stateAt(x, y, z)) return;
-    if (material === 4) {
-      // A window is a pane. A wall of glass blocks is a greenhouse, and it hides the surround it sits in.
-      const sides = {} as Record<Facing, boolean>;
-      for (const { dx, dz, facing } of directions) sides[facing] = !!grid.get(x + dx, y, z + dz);
-      grid.setState(x, y, z, pane('gray_stained_glass_pane', sides));
-    } else if (kind === 'floor') {
-      // Only the course you walk on is worth naming, and it is boards upstairs and flags below: you do not
-      // lay a stone floor on joists.
-      if (grid.get(x, y + 1, z)) return;
-      const n = noise(x, y, z, seed ^ 0x51ed270b);
-      grid.setState(x, y, z, y > 0 ? boards[n < .18 ? 1 : 0] : flags[n < .35 ? 1 : 0]);
-    } else if (material === 1 && (kind === 'wall' || kind === 'support' || kind === 'roof')) {
+    if (material === 1 && (kind === 'wall' || kind === 'support' || kind === 'roof')) {
       if (directions.every(({ dx, dz }) => grid.get(x + dx, y, z + dz))) return;
-      // Squaring the sample keeps the commonest stone commonest: a wall of eight stones in even shares is
-      // not masonry either.
       const n = noise(Math.floor(x / 3), Math.floor(y / 2), Math.floor(z / 3), seed);
-      grid.setState(x, y, z, y <= 1 && n > .82 ? damp : stones[Math.floor(n * n * stones.length)]);
+      grid.setState(x, y, z, variants[y <= 1 && n > .82 ? 3 : n > .88 ? 2 : n > .65 ? 1 : 0]);
     } else if (material === 2 && kind === 'wall') grid.setState(x, y, z, timber(y % 6 === 0 ? 'x' : 'y'));
   });
 
@@ -255,12 +209,6 @@ export function buildDetailedModel(plan: Plan): { grid: SparseBlocks; structure:
           // String courses sit below floor lines; protected openings interrupt them instead of being bricked up.
           if (y > 0 && y % 6 === 5) put(x + dir.dx, y, z + dir.dz,
             slab(castle || material === 1 ? 'stone_brick_slab' : 'spruce_slab', 'top'), castle || material === 1 ? 1 : 2, 'support', c);
-          // A plinth: the lowest course carried one block proud and chamfered back above, so the mass meets
-          // the ground on a base rather than on a cut line. A doorway's own clearance interrupts it.
-          if (y === 0 && material === 1) {
-            put(x + dir.dx, 0, z + dir.dz, solid(castle ? 'cobblestone' : 'stone_bricks'), 1, 'support', c);
-            put(x + dir.dx, 1, z + dir.dz, stair('stone_brick_stairs', opposite(dir.facing)), 1, 'support', c);
-          }
           // Hall/chapel buttresses are structural rhythms, not one enormous featureless extruded facade.
           if (castle && (c.kind === 'hall' || c.kind === 'chapel') && y < c.topY - 2 && along > start + 2 && along < end - 2 && (along - start) % 8 === 0) {
             const px = x + dir.dx, pz = z + dir.dz;
@@ -281,8 +229,9 @@ export function buildDetailedModel(plan: Plan): { grid: SparseBlocks; structure:
     const dx = alongX ? 0 : outward, dz = alongX ? outward : 0;
     const facing: Facing = dx < 0 ? 'west' : dx > 0 ? 'east' : dz < 0 ? 'north' : 'south';
     let depth = 0;
-    while (depth < shell(c) + 1 && structure.kindAt(o.x + dx * (depth + 1), o.y, o.z + dz * (depth + 1)) === 'glass') depth++;
+    while (depth < (c.polygon.length>4?0:shell(c)-1) && structure.kindAt(o.x + dx * (depth + 1), o.y, o.z + dz * (depth + 1)) === 'glass') depth++;
     const x = o.x + dx * (depth + 1), z = o.z + dz * (depth + 1);
+    if(plan.components.some(other=>other.id!==c.id&&other.kind!=='court'&&o.y<other.topY&&insidePolygon(x+.5,z+.5,other.polygon)))continue;
     for (let w = -1; w <= o.width; w++) {
       const xx = x + (alongX ? w : 0), zz = z + (alongX ? 0 : w);
       put(xx, o.y - 1, zz, slab('stone_brick_slab', 'top'), 1, 'support', c);
@@ -304,75 +253,9 @@ export function buildDetailedModel(plan: Plan): { grid: SparseBlocks; structure:
     for (let z = b.z; z < b.z + b.d; z += 2) for (let x = b.x; x < b.x + b.w; x += 2)
       put(x, y, z, wallPost('brick_wall'), 8, 'chimney', c);
   }
-  furnish(plan, grid, (x, y, z) => doorways.some(g => g.test(x, y, z)));
+  enrichArchitecture(context);
+  furnishInteriors(context);
   const extent = grid.extent(plan.minY, plan.maxY); grid.bounds = extent.bounds;
-  return { grid, structure, minY: extent.minY, maxY: extent.maxY };
-}
-
-/**
- * What a fitting is once it is blocks and not a rectangle on a drawing, and a light in every room that has a
- * ceiling to hang one from. This is the difference between a labelled plan and a place: a kitchen with no
- * furnace in it is a room called Kitchen, and a keep with no light in it is a mob farm by the second night.
- *
- * Fittings only name cells the plan already filled, so nothing here can close a route or a doorway that the
- * generator kept clear. Lanterns are the one thing added to empty air, and they keep out of the doorways.
- */
-function furnish(plan: Plan, grid: SparseBlocks, doorway: (x: number, y: number, z: number) => boolean) {
-  const dress = (x: number, y: number, z: number, state: BlockState) => { if (grid.get(x, y, z)) grid.setState(x, y, z, state); };
-  for (const room of plan.rooms) {
-    const centre = { x: room.bounds.x + room.bounds.w / 2, z: room.bounds.z + room.bounds.d / 2 };
-    for (const f of room.furniture) {
-      // A dais is the floor it raises, so it is built a course below the fittings that stand on it.
-      const y0 = f.type === 'dais' ? f.y - 1 : f.y, mid = { x: f.x + Math.floor(f.w / 2), z: f.z + Math.floor(f.d / 2) };
-      const facing: Facing = Math.abs(f.x - centre.x) > Math.abs(f.z - centre.z)
-        ? (f.x < centre.x ? 'east' : 'west') : (f.z < centre.z ? 'south' : 'north');
-      const fill = (state: BlockState) => {
-        for (let y = y0; y < y0 + f.h; y++) for (let z = f.z; z < f.z + f.d; z++) for (let x = f.x; x < f.x + f.w; x++) dress(x, y, z, state);
-      };
-      switch (f.type) {
-        // A fire is a fire: brick, and something burning in it, which is where half the light comes from.
-        case 'hearth': fill(solid('bricks')); dress(mid.x, y0, mid.z, blockState('campfire', { lit: 'true', facing, signal_fire: 'false', waterlogged: 'false' })); break;
-        case 'oven': fill(solid('bricks')); dress(mid.x, y0, mid.z, blockState('furnace', { facing, lit: 'true' })); break;
-        case 'forge': fill(solid('polished_blackstone_bricks')); dress(f.x, y0, f.z, blockState('blast_furnace', { facing, lit: 'true' }));
-          dress(mid.x, y0, mid.z, blockState('anvil', { facing })); break;
-        case 'still': fill(solid('polished_andesite')); dress(mid.x, y0, mid.z, blockState('brewing_stand', { has_bottle_0: 'true', has_bottle_1: 'false', has_bottle_2: 'true' })); break;
-        // The essentials a player asked for are read off the room they were programmed into.
-        case 'lectern': fill(solid('bookshelf')); dress(mid.x, y0, mid.z, room.name.startsWith('Enchant')
-          ? blockState('enchanting_table') : blockState('lectern', { facing, has_book: 'true', powered: 'false' })); break;
-        case 'crate': fill(blockState('barrel', { facing: 'up', open: 'false' })); break;
-        case 'shelf': fill(solid('bookshelf')); break;
-        case 'desk': fill(solid('crafting_table')); dress(f.x, y0, f.z, solid('cartography_table')); break;
-        case 'altar': fill(blockState('smooth_stone_slab', { type: 'double', waterlogged: 'false' }));
-          dress(mid.x, y0, mid.z, blockState('lantern', { hanging: 'false', waterlogged: 'false' })); break;
-        case 'well': fill(blockState('water', { level: '0' }));
-          for (const [dx, dz] of [[0, 0], [f.w - 1, 0], [0, f.d - 1], [f.w - 1, f.d - 1]])
-            dress(f.x + dx, y0, f.z + dz, wallPost('cobblestone_wall')); break;
-        case 'dais': fill(solid('polished_andesite')); break;
-        // A bed is two blocks or it is a block that looks like half a bed. The head goes to the wall.
-        case 'bed': {
-          fill(solid('white_wool'));
-          const head: Facing = opposite(facing), along = head === 'north' || head === 'south';
-          const step = head === 'north' || head === 'west' ? -1 : 1;
-          const foot = { x: mid.x - (along ? 0 : step), z: mid.z - (along ? step : 0) };
-          if (grid.get(foot.x, y0, foot.z)) {
-            dress(foot.x, y0, foot.z, blockState('red_bed', { facing: head, part: 'foot', occupied: 'false' }));
-            dress(mid.x, y0, mid.z, blockState('red_bed', { facing: head, part: 'head', occupied: 'false' }));
-          }
-          break;
-        }
-        case 'seat': case 'bench': fill(stair('spruce_stairs', opposite(facing))); break;
-        case 'table': fill(slab('spruce_slab', 'top')); break;
-      }
-    }
-    if (room.kind === 'court' || (room.floorY < 0 && room.kind === 'storage')) continue;
-    for (let x = room.bounds.x + 2; x < room.bounds.x + room.bounds.w - 1; x += 6)
-      for (let z = room.bounds.z + 2; z < room.bounds.z + room.bounds.d - 1; z += 6) {
-        const y = Math.min(room.ceilingY, room.floorY + 5);
-        // A lantern hangs from a ceiling, in the open, and never in the light of a doorway it would block.
-        if (grid.get(x, y, z) || !grid.get(x, y + 1, z) || doorway(x, y, z)) continue;
-        if (!insidePolygon(x + .5, z + .5, room.polygon) || room.holes.some(h => within(h, x, z))) continue;
-        grid.apply({ x, y, z, w: 1, h: 1, d: 1, material: 9, kind: 'furniture', componentId: room.componentId });
-        grid.setState(x, y, z, blockState('lantern', { hanging: 'true', waterlogged: 'false' }));
-      }
-  }
+  grid.detailVersion=DETAIL_VERSION;
+  return { grid, structure, minY: extent.minY, maxY: extent.maxY, features };
 }

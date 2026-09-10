@@ -4,7 +4,7 @@ import { generatePlan } from './architecture.ts';
 import { DEFAULT_SETTINGS, FAMILIES } from './model.ts';
 import { voxelize } from './voxels.ts';
 import { buildDetailedModel } from './architectural-detail.ts';
-import { cellIndex, floorOutline, litematicaFile, nbtBytes, wholeBuilding, type Schematic } from './litematica.ts';
+import { cellIndex, floorOutline, litematicaFile, nbtBytes, paletteKey, wholeBuilding, type Schematic } from './litematica.ts';
 
 // A reader written from the format rather than from the writer: if the two agree, the writer is writing NBT
 // and not merely something this file can read back.
@@ -69,7 +69,7 @@ void test('every cell comes back out of the packed block states',()=>{
     assert.deepEqual(region.Position,{x:0,y:0,z:0});
     assert.deepEqual(region.Size,{x:schematic.size.x,y:schematic.size.y,z:schematic.size.z});
     const palette=region.BlockStatePalette as {Name:string;Properties?:Record<string,string>}[];
-    assert.deepEqual(palette.map(p=>p.Name),schematic.palette);
+    assert.deepEqual(palette.map(p=>p.Name),schematic.palette.map(p=>p.name));
     assert.equal(palette[0].Name,'minecraft:air','the empty cell is not the first entry of the palette');
     const {longs}=region.BlockStates as {longs:bigint[]};
     const bits=Math.max(2,Math.ceil(Math.log2(Math.max(2,schematic.palette.length))));
@@ -116,21 +116,22 @@ void test('the whole building is architecture, not a massing model',()=>{
     {...DEFAULT_SETTINGS,kind:'house' as const,family:'hall-house' as const,size:128,floors:2,seed:'DRESS'}]){
     const plan=generatePlan(settings),model=buildDetailedModel(plan),s=wholeBuilding(plan,model.grid);
     const tag=`${settings.kind}/${settings.family}`,o=s.origin!;
-    // Nothing the plan built is lost in the compilation, save the blocked-out roofs it replaces with real ones.
+    // Nothing the plan built is lost in the compilation, save the blocked-out roofs and the fitting
+    // envelopes it replaces with real ones.
     const structure=voxelize(plan);
     let lost=0;
-    structure.forEach((x,y,z)=>{if(structure.kindAt(x,y,z)!=='roof'&&!s.cells[cellIndex(s.size,x-o.x,y-o.y,z-o.z)])lost++;});
+    structure.forEach((x,y,z)=>{if(!['roof','furniture'].includes(structure.kindAt(x,y,z))&&!s.cells[cellIndex(s.size,x-o.x,y-o.y,z-o.z)])lost++;});
     assert.equal(lost,0,`${tag}: ${lost} blocks of the plan are missing from the build`);
     const tally=new Map<string,number>();let placed=0;
-    for(const cell of s.cells){if(!cell)continue;placed++;const name=s.palette[cell].split('[')[0];tally.set(name,(tally.get(name)??0)+1);}
+    for(const cell of s.cells){if(!cell)continue;placed++;const name=s.palette[cell].name;tally.set(name,(tally.get(name)??0)+1);}
     const share=(test:RegExp)=>[...tally].filter(([n])=>test.test(n)).reduce((t,[,n])=>t+n,0)/placed;
     assert.ok(s.palette.length>=40,`${tag}: a palette of ${s.palette.length} states`);
     assert.ok(share(/_stairs|_slab/)>=0.12,`${tag}: stairs and slabs are ${(100*share(/_stairs|_slab/)).toFixed(1)}% of the build`);
     const stones=[...tally.keys()].filter(n=>/stone|andesite|cobble|granite|diorite|gravel/.test(n)&&!/_stairs|_slab|_wall/.test(n));
     assert.ok(stones.length>=6,`${tag}: the walls are made of ${stones.length} stones: ${stones.join(', ')}`);
-    // A window is a pane. A wall of glass blocks is a greenhouse.
-    assert.ok(!tally.has('minecraft:glass'),`${tag}: solid glass in the walls`);
-    assert.ok((tally.get('minecraft:gray_stained_glass_pane')??0)>20,`${tag}: only ${tally.get('minecraft:gray_stained_glass_pane')??0} panes`);
+    // A window is leaded glazing set in a surround, not a sheet of the default glass block.
+    assert.ok(!tally.has('minecraft:glass'),`${tag}: undressed glass in the walls`);
+    assert.ok((tally.get('minecraft:gray_stained_glass')??0)>20,`${tag}: only ${tally.get('minecraft:gray_stained_glass')??0} glazed cells`);
     // And it is lit and fitted out, which is the difference between a castle and a mob farm.
     assert.ok((tally.get('minecraft:lantern')??0)>=8,`${tag}: ${tally.get('minecraft:lantern')??0} lanterns in the whole estate`);
     assert.ok((tally.get('minecraft:campfire')??0)>0,`${tag}: no fire in any hearth`);
@@ -139,7 +140,7 @@ void test('the whole building is architecture, not a massing model',()=>{
     let pairs=0,same=0;
     for(let y=1;y<s.size.y;y++)for(let z=0;z<s.size.z;z+=2)for(let x=0;x<s.size.x;x+=2){
       const a=s.cells[cellIndex(s.size,x,y,z)],c=s.cells[cellIndex(s.size,x,y-1,z)];
-      if(!a||!c||!/stone|andesite|cobble|granite|diorite/.test(s.palette[a]))continue;
+      if(!a||!c||!/stone|andesite|cobble|granite|diorite/.test(paletteKey(s.palette[a])))continue;
       pairs++;if(a===c)same++;
     }
     assert.ok(same/pairs>0.25,`${tag}: only ${(100*same/pairs).toFixed(0)}% of stone neighbours match, which is noise and not masonry`);

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type * as Three from 'three';
 import { MATERIALS, insidePolygon, type Plan } from '@/lib/model';
 import type { MeshData } from '@/lib/voxels';
+import { buildingGlb } from '@/lib/gltf';
 
 export type ViewControls = { roofs: boolean; isolate: boolean; explode: boolean; cutX: number; cutZ: number; floor: number };
 type Props = { plan: Plan; meshes: MeshData[]; controls: ViewControls; selected?: string; onSelect: (id: string) => void };
@@ -11,7 +12,8 @@ export default function BuildingViewer({ plan, meshes, controls, selected, onSel
   const host = useRef<HTMLDivElement>(null), live = useRef({ plan, controls, selected, onSelect });
   live.current = { plan, controls, selected, onSelect };
   const update = useRef<(() => void) | null>(null), preset = useRef<((view: View) => void) | null>(null);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(''),[exportError,setExportError]=useState('');
+  const exportMesh=()=>{try{const data=buildingGlb(meshes,plan.name),url=URL.createObjectURL(new Blob([data as BlobPart],{type:'model/gltf-binary'})),a=document.createElement('a');a.href=url;a.download=plan.name.toLowerCase().replace(/[^a-z0-9]+/g,'-')+'.glb';a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);setExportError('');}catch(cause){setExportError(cause instanceof Error?cause.message:'Mesh export failed.');}};
   useEffect(() => {
     const el = host.current!; let disposed = false;
     const disposers: (() => void)[] = [];
@@ -38,10 +40,10 @@ export default function BuildingViewer({ plan, meshes, controls, selected, onSel
         const materials = new Map<string, Three.MeshStandardMaterial>(), objects: Three.Mesh[] = [], bounds = new T.Box3();
         disposers.push(() => { for (const object of objects) object.geometry.dispose(); for (const material of materials.values()) material.dispose(); });
         for (const data of meshes) {
-          const color = data.color ?? MATERIALS[data.material].color, key = `${data.material}/${color}`;
+          const color = data.color ?? MATERIALS[data.material].color, key = `${data.material}/${color}/${data.emissive??''}`;
           let material = materials.get(key);
           if (!material) {
-            material = new T.MeshStandardMaterial({ color, roughness: data.material === 4 ? .3 : .88, metalness: 0,
+            material = new T.MeshStandardMaterial({ color, emissive:data.emissive??'#000000',emissiveIntensity:data.emissive?1.3:0, roughness: data.material === 4 ? .3 : .88, metalness: 0,
               side: T.DoubleSide, clippingPlanes: planes, clipShadows: true });
             materials.set(key, material);
           }
@@ -133,9 +135,11 @@ export default function BuildingViewer({ plan, meshes, controls, selected, onSel
   }, [meshes, plan]);
   useEffect(() => { update.current?.(); }, [controls, selected]);
   return <div className="three-stage" ref={host}>
-    {!error && <fieldset aria-label="3D camera views" style={{ position: 'absolute', top: 14, left: 14, zIndex: 2, display: 'flex', gap: 6, border: 0, margin: 0, padding: 0 }}>
+    {!error && <fieldset aria-label="3D camera views" style={{ position: 'absolute', top: 14, left: 14, zIndex: 2, display: 'flex', flexWrap:'wrap',right:14,gap: 6, border: 0, margin: 0, padding: 0 }}>
       {(['perspective', 'front', 'top'] as const).map(view => <button key={view} className="button button-outline" style={{ padding: '7px 11px', fontSize: 12, background: 'rgba(248,246,238,.94)' }} onClick={() => preset.current?.(view)}>{view === 'perspective' ? 'Fit model' : view === 'front' ? 'Front' : 'Top'}</button>)}
+      <button className="button button-outline" style={{padding:'7px 11px',fontSize:12,background:'rgba(248,246,238,.94)'}} disabled={!meshes.length} onClick={exportMesh} title="Export the complete architectural model, including hidden roofs and floors">Export 3D · GLB</button>
     </fieldset>}
+    {exportError&&<output style={{position:'absolute',bottom:12,left:12,zIndex:3}}>{exportError}</output>}
     {error && <div className="webgl-fallback" role="status"><strong>Plans are ready. 3D is unavailable.</strong><p>{error}</p></div>}
   </div>;
 }

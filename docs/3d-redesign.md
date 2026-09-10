@@ -1,40 +1,47 @@
-# Exportable architectural detail
+# Keepwright architectural compiler · second iteration
 
-This change treats the 3D building as architecture, not as a lighting preset. It leaves `architecture.ts`, the room program, component composition, navigation, floor drawing, and structural audit unchanged.
+## Architecture, not just surface decoration
 
-## Design direction
+The floor-plan generator remains authoritative. `buildDetailedModel(plan)` compiles its accepted structural plan into a more elaborate block-state building. The worker, whole-building Litematica export, block-layer inspector and GLB exporter share that result. Floor drawings and floor-outline schematics continue to use the structural grid.
 
-The user-supplied `Raidproof_Castle.litematic` and `Skyhold_Keep2.litematic` informed the treatment of roof silhouettes, projecting cornices, capped battlements, window surrounds and stone/timber contrast. They are independent reference builds, not outputs of this generator. Their source files and assets are not included or copied into the application.
+Larger pitched towers receive a flared lower roof, a glazed upper drum, a second crown and a finial. Suitable battlement towers receive corbel-supported corner turrets. Long gables receive dormers, carved verge profiles and small gable windows. Facades receive projecting courses, window surrounds, corner piers, entrance surrounds and selected heraldic hangings. Gatehouses receive a developed roof and entrance treatment. A feature manifest records what was actually placed.
 
-The implementation adds pitched stair-block roofs with verge and ridge treatments; steeper tower roofs and finials; battlements following the actual polygon rather than its bounding rectangle; ledges and corbels; alternating corner masonry; deterministic, clustered stone variation; framed window openings; hall/chapel buttresses; chimney collars/pots; and directional stair treads. Upper timber framing uses oriented stripped spruce logs. It does not add a new floor-plan family, import reference builds, or claim to reproduce their hand-built quality.
+Upper motifs are checked as complete groups before placement. Existing openings, rooms, stair clearance, routes, air cuts and open-court reservations constrain decoration. Non-roof, non-furniture structural blocks are retained. Furniture is remodeled within existing fitting footprints, including paired beds, shelving, benches, tables, barrels and selected work fittings. Lanterns are suspended from real overhead cells. This is not a second room-layout algorithm.
 
-## One shared architectural model
+## Implementation
 
-`buildDetailedModel(plan)` returns a raw structural grid and a final detailed grid. The worker meshes the final grid and uses it for block-layer requests. Whole-building export compiles the same model. Floor drawings and floor-outline schematics still use the structural grid.
+`architectural-detail.ts` orchestrates structural replay, protection masks, roof replacement and seeded material patches. `architectural-language.ts` adds the architectural motifs. `architectural-furnishings.ts` handles fittings and interior lights. `detail-context.ts` and `block-states.ts` define their shared state/shape vocabulary.
 
-A sparse sidecar palette stores exact block states without changing existing material/role IDs. Full cubes retain greedy meshing. Stairs, slabs and isolated wall posts use exact quarter-block occupancy. Interfaces remain visible when roofs are hidden or storeys exploded. Every state used by this compiler has a corresponding vanilla block name/properties in the NBT palette; decoration is not a viewer-only mesh.
+`voxels.ts` contains sparse structural/state grids and mixed-resolution partial-block meshing. Thin elements use sixteenth-block occupancy where needed; stairs and slabs use lower-resolution box shapes. Meshes batch by material/color, roof ownership and floor rather than by stair orientation.
 
-Room interiors, door/window volumes, stairs, court reservations, approach routes and explicit air cuts are protected. Added roofs and details cannot replace non-roof structural cells. Export bounds grow to enclose roof peaks and negative-coordinate overhangs. The NBT writer retains version 5 and Minecraft data version 2586 and writes `Properties` separately from `Name`.
+`litematica.ts` retains upstream's object-based `{name, props}` palette API, writes NBT properties, and calculates completed export bounds. Passing an ordinary structural grid to `wholeBuilding` still compiles it; a version-marked detailed grid is reused directly. `gltf.ts` writes binary glTF without a new dependency. The viewer's GLB button exports the complete, uncut model in Y-up block units; hidden roofs and exploded-view offsets do not change that export.
 
-The viewer uses material-specific colors, directional shadows, a neutral ground plane and camera fitting based on the actual mesh bounds. Fit, entrance-facing Front and Top presets supplement the existing controls. It is not a Minecraft texture-pack renderer; block layers still show material categories rather than oriented stair/slab symbols.
+`build.worker.ts` preserves upstream composition alternatives and the optional candidate-attempt argument. No application dependencies are added. The generator, model, navigation, structural audits, page composition picker and lockfile are not replaced. The earlier export-only `dressing.ts` pass is gone: everything it did that this compiler wants is inside the compiler, where the viewer sees it too.
+
+## Crownward Citadel reference
+
+`showcase-plan.ts` defines an **authored Plan-format composition** for inspecting the compiler at castle scale: twelve primary components, a separate ward gatehouse, forty-six room records and seven floor levels. The terraced podium, site layout and volume arrangement are authored in the example. They are not new layout rules inserted into the application's generator.
+
+This reference is **not output from the candidate search** in `architecture.ts`. Its Plan validation flag explicitly records that it has not been ranked or certified by that search. The rooms and stairs are real structural geometry, but its complete navigation graph has not been certified. Do not treat this sample as evidence that every seed produces its massing or that every room has a validated playable route.
+
+Regenerate it from the repository root:
+
+```sh
+npm run showcase:architecture -- ./exports/crownward
+```
+
+The script writes Litematica and GLB files, structural/detailed mesh data, the Plan and a feature report. The included PNGs render this actual geometry, not an image-model concept and not a Minecraft screenshot. They use flat material colors, not Minecraft textures. Some decorative fitting shapes are simplified; their block IDs and properties are preserved for the game to render. Texture-perfect visual parity is not claimed.
 
 ## What changed when this was merged
 
-Two passes wanted the same job. `lib/dressing.ts` — a separate exporter-only pass over the voxel grid — was
-stronger on material and contents; this one is stronger on form and feeds the viewer as well as the export.
-They were merged into this module rather than kept side by side, and `lib/dressing.ts` was deleted:
+The package was written against an upstream that predates the first redesign merge, so it was applied by hand rather than by its installer, and three things were carried across it:
 
-- The stone field, per-kind stone sets, plinth, window panes, floor boards and flags, lanterns and the
-  fittings pass all moved here, so the 3D view shows them too rather than only the export.
-- Every state was re-picked so it exists in Java 1.16.5, which is the data version the schematic writer
-  claims. That ruled out the tuff, deepslate, candles and chiseled bookshelves the old pass used: a block
-  name the client cannot resolve is not a nicer stone, it is a hole.
-- `lib/build.worker.ts` keeps the `only`/`alternatives` plumbing that lets a reader pick a different
-  composition for the same seed; the package's version had dropped it.
-- `lib/litematica.ts` keeps its notes on why the writer targets schematic version 5 and data version 2586,
-  and gains this package's palette validation and detailed-model default.
-- `prepareMeshes` caches the state sidecar per chunk and each shaped cell's six neighbours. Without that,
-  meshing the largest estate cost 2.1 s rather than 1.5 s.
+- `lib/build.worker.ts` and `lib/litematica.ts` keep the composition-alternatives plumbing and the writer's own notes on why it targets schematic version 5 and data version 2586.
+- `prepareMeshes` buckets the state sidecar per chunk, reads each of a shaped block's six neighbours once instead of once per sub-block face, promotes only the face that actually meets a finer neighbour, and allocates nothing in its inner loop. Without that, meshing the largest estate cost 4.1 s rather than 2.6 s.
+- `chain()` no longer declares an `axis`, which a chain does not have before 1.17 — the one state in the package that fell outside the version the writer claims.
+- The lint fixes and typed test helpers the repository already carried were reapplied on top of the package's files.
+
+Panes, per-kind stone sets and a separate plinth pass from the first merge are gone, superseded by this package's glazing, masonry patches and facade base course.
 
 ## Validation
 
@@ -51,34 +58,16 @@ What was actually run, in this repository, against the real generator:
 
 | Check | Result |
 |---|---|
-| `npm run test:architecture` | 13 focused + 12 integration tests pass |
-| `npm test` | 71 tests pass |
+| `npm run test:architecture` | 21 focused + 12 integration tests pass |
+| `npm test` | 79 tests pass |
 | `npm run typecheck`, `npm run build` | clean |
 | `npm run lint` | 32 errors, all pre-existing |
-| 360-setting compile sweep (3 kinds × every family × 6 sizes × 5 storey counts) | 0 failures; detail mean 183 ms, slowest 501 ms; mesh mean 737 ms, slowest 1844 ms; 95 distinct block states, every one a well-formed vanilla id that exists in 1.16.5 |
+| 360-setting compile sweep (3 kinds × every family × 6 sizes × 5 storey counts) | 0 failures; compile mean 305 ms, slowest 805 ms; mesh mean 1164 ms, slowest 2721 ms; 73 distinct block states, every one a well-formed vanilla id that exists in 1.16.5 |
 | `node lib/regression-batch.ts 200` | 200/200 validity, 200/200 search success — the generator is untouched by this change |
-| Cross-process determinism | the NBT of twelve families hashes identically in three separate processes |
+| Cross-process determinism | the NBT of twelve families hashes identically in separate processes |
 
-The focused suite covers shape area/winding, face culling across negative and positive chunk boundaries,
-roof/floor separation, stale state removal, immutable source plans, clear entrances/interiors/louvers/courts/
-stairs, polygonal battlements, deterministic output, export extents and independent gzip/NBT/property/packed-cell
-round trips. The integration suite exercises every architectural family at OUTLINE/224/3 and verifies
-structural preservation, unchanged outlines, opening clearances, cell-by-cell export identity, and
-finite/index-valid meshes.
+The focused suite covers mesh surfaces and chunk boundaries, thin sixteenth-block elements, floor/roof interfaces, protected openings and stair headroom, unchanged structural outlines, determinism, large-reference structural preservation, paired beds and lantern attachment, export bounds, NBT properties and bit packing, and GLB buffer/material data. The integration suite exercises every architectural family at OUTLINE/224/3.
 
-**Not run here:** a live browser session, and an actual paste in Minecraft. The tests protect the geometry and
-the file format; they do not certify a pleasing silhouette for every seed.
+**Still not run here:** live-browser interaction, and a Minecraft/Litematica paste. The writer declares schematic version 5 and data version 2586, and every state the compiler can write exists in Java 1.16.5; in-game block updates, lighting coverage, mob spawning, inventories and exact client-side shape reconciliation are not certified. Connected block cells are not proof of physical contact between every partial shape, and the reference's complete room-to-room navigation has not been certified.
 
-For the preview and sample schematic, `scripts/detail-fixture.ts` builds a deliberately small structural
-fixture. It is not an application-generated castle or a game screenshot.
-
-## Manual acceptance
-
-Open representative castles and manors in the application; inspect all elevations and close-up roof
-junctions; test roof hiding, isolated floors, exploded floors, clipping and room selection; then export and
-paste the same build in Minecraft/Litematica. Check facing/half properties, roof junctions, doorways, stair
-landings, louver shafts, courtyard openness and maximum-height bounds.
-
-There are no new dependencies. Source plan JSON remains the original structural design; exact decorative
-states are reconstructed deterministically for 3D and whole-building export. The optional explicit raw grid
-parameter to `wholeBuilding` preserves structural-only export for callers that need it.
+Before merging anything further, inspect several real castle and manor seeds, small footprints and adjoining roof heights. Check doors, stairs, courtyard openness, roof visibility, isolation and GLB export; then paste into a disposable world. The schematic includes air within its envelope, so take care when pasting into an existing build.

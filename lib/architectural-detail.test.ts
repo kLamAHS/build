@@ -5,7 +5,7 @@ import { architectureFixture } from './test-fixtures/architecture.ts';
 import { buildDetailedModel } from './architectural-detail.ts';
 import { solid, slab, stair, wallPost, parseBlockState, stateKey } from './block-states.ts';
 import { SparseBlocks, voxelize, prepareMeshes, type MeshData } from './voxels.ts';
-import { wholeBuilding, floorOutline, cellIndex, litematicaFile, nbtBytes, packBlockStates } from './litematica.ts';
+import { wholeBuilding, floorOutline, cellIndex, litematicaFile, nbtBytes, packBlockStates, paletteKey } from './litematica.ts';
 
 function one(x=0,y=0,z=0){const grid=new SparseBlocks({x:-20,z:-20,w:60,d:60});grid.apply({x,y,z,w:1,h:1,d:1,material:1,kind:'wall',componentId:'test'});return grid;}
 function surface(meshes:MeshData[]){let area=0;for(const m of meshes)for(let i=0;i<m.indices.length;i+=3){
@@ -47,7 +47,11 @@ void test('doors, glass, hall interior, entry approach and explicit louver remai
   const plan=architectureFixture(),{grid,structure}=buildDetailedModel(plan);
   for(let x=18;x<21;x++)for(let z=-10;z<=2;z++)for(let y=1;y<5;y++)assert.equal(grid.get(x,y,z),structure.get(x,y,z));
   for(let x=6;x<8;x++)for(let z=-2;z<=0;z++)for(let y=2;y<6;y++)assert.equal(grid.kindAt(x,y,z),'glass');
-  for(let x=1;x<28;x++)for(let z=1;z<16;z++)for(let y=1;y<12;y++)assert.equal(grid.get(x,y,z),0);
+  for(let x=1;x<28;x++)for(let z=1;z<16;z++)for(let y=1;y<12;y++){
+    if(!grid.get(x,y,z))continue;
+    assert.ok(y>=4,'A light intrudes into standing headroom');
+    assert.ok(['minecraft:lantern','minecraft:chain'].includes(grid.stateAt(x,y,z)?.name??''),'Architectural detail intrudes into the hall');
+  }
   for(let x=12;x<15;x++)for(let z=7;z<10;z++)for(let y=12;y<34;y++)assert.equal(grid.get(x,y,z),0,`Louver closed at ${x},${y},${z}`);
 });
 void test('protected court stays open to the sky',()=>{
@@ -79,13 +83,13 @@ void test('compiled geometry, material patches and exact state exports are deter
 });
 void test('tall roofs and negative coordinates are fully enclosed in whole-building exports',()=>{
   const plan=architectureFixture(),model=buildDetailedModel(plan),s=wholeBuilding(plan);
-  assert.ok(model.maxY>plan.maxY);assert.ok(s.palette.length>9);assert.ok(s.palette.some(k=>k.includes('facing=')));
+  assert.ok(model.maxY>plan.maxY);assert.ok(s.palette.length>9);assert.ok(s.palette.some(p=>p.props?.facing));
   model.grid.forEach((x,y,z)=>{const at=cellIndex(s.size,x-s.origin!.x,y-s.origin!.y,z-s.origin!.z);
     assert.ok(at>=0&&at<s.cells.length);const expected=model.grid.stateAt(x,y,z)?.key;
-    assert.ok(s.cells[at]>0);if(expected)assert.equal(s.palette[s.cells[at]],expected);
+    assert.ok(s.cells[at]>0);if(expected)assert.equal(paletteKey(s.palette[s.cells[at]]),expected);
   });
   assert.equal(s.cells.reduce((sum,v)=>sum+(v?1:0),0),model.grid.stats().blocks);
-  const raw=wholeBuilding(plan,voxelize(plan));assert.equal(raw.size.y,plan.maxY-plan.minY+1);assert.ok(raw.palette.every(k=>!k.includes('[')));
+  const raw=wholeBuilding(plan,voxelize(plan));assert.deepEqual(raw,s,'A caller-supplied structural grid must still receive the same architectural treatment');
 });
 
 // Independent NBT reader: deliberately does not call any of the writer's parsing helpers.
@@ -109,7 +113,7 @@ void test('gzipped NBT round-trips all properties and every packed cell across 6
   const s=wholeBuilding(architectureFixture()),file=await litematicaFile(s,1700000000000),nbt=readNbt(gunzipSync(file));
   const region=nbt.Regions[s.name] as unknown as {BlockStatePalette:State[];BlockStates:bigint[]};
   assert.equal(nbt.Version,5);assert.equal(nbt.MinecraftDataVersion,2586);assert.equal(nbt.Metadata.TimeCreated,BigInt(1700000000000));
-  const palette=region.BlockStatePalette.map(p=>stateKey(p.Name,p.Properties??{}));assert.deepEqual(palette,s.palette);
+  const palette=region.BlockStatePalette.map(p=>stateKey(p.Name,p.Properties??{}));assert.deepEqual(palette,s.palette.map(paletteKey));
   const bits=Math.max(2,Math.ceil(Math.log2(s.palette.length))),mask=(BigInt(1)<<BigInt(bits))-BigInt(1),words=region.BlockStates;
   for(let i=0;i<s.cells.length;i++){
     const bit=i*bits,word=Math.floor(bit/64),offset=bit%64;let v=words[word]>>BigInt(offset);
@@ -122,6 +126,6 @@ void test('invalid block states and inconsistent schematic palettes fail rather 
   for(const text of ['stone_bricks','minecraft:stone[x=]','minecraft:stone[x=a,x=b]'])assert.throws(()=>parseBlockState(text));
   assert.deepEqual(parseBlockState('minecraft:spruce_stairs[facing=north,half=top]'),{name:'minecraft:spruce_stairs',properties:{facing:'north',half:'top'}});
   const s=wholeBuilding(architectureFixture(),voxelize(architectureFixture()));
-  assert.throws(()=>nbtBytes({...s,size:{x:1,y:1,z:1}}));assert.throws(()=>nbtBytes({...s,palette:['minecraft:stone']}));
+  assert.throws(()=>nbtBytes({...s,size:{x:1,y:1,z:1}}));assert.throws(()=>nbtBytes({...s,palette:[{name:'minecraft:stone'}]}));
   assert.throws(()=>packBlockStates(new Uint16Array([4]),2));assert.throws(()=>packBlockStates(new Uint16Array([0]),1));
 });
