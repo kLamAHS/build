@@ -5,6 +5,7 @@ import { bayLines, compositionReport } from './composition.ts';
 import { componentFootprint, DEFAULT_SETTINGS, FAMILIES, insidePolygon, intersects, type Settings, type Plan, type Rect } from './model.ts';
 import { voxelize, prepareMeshes, SparseBlocks } from './voxels.ts';
 import { auditArchitecture } from './architectural-audit.ts';
+import { batchSettings, regressionBatch } from './regression.ts';
 import { accessGraph, transitViolations, isCirculation, routeToRoom, navigationReport, articulationPoints } from './navigation.ts';
 
 export const representatives:Settings[]=(['house','manor','castle'] as const).flatMap(kind=>[128,256].flatMap(size=>[0,1,2].map(i=>({...DEFAULT_SETTINGS,kind,size,seed:`REVIEW-${kind}-${size}-${i}`,family:FAMILIES[kind][i].id}))));
@@ -751,4 +752,56 @@ void test('new seeds vary in architecture, not only in labels or in which way ro
     assert.ok(Math.max(...massings.values())<=N*.4,`${family.id}: ${Math.max(...massings.values())} of ${N} seeds raise the same massing`);
   }
   assert.ok(worst>=.33,`${worstFamily} is the least varied at ${(worst*100).toFixed(0)}%`);
+});
+
+void test('the correctness cases: a strip is rejected, a gallery is not, and a yard keeps its sky',()=>{
+  // The defect this answers: rules that lived only in the stage that placed something, so a later stage
+  // could undo them and nothing would say so.
+  const p=generatePlan({...DEFAULT_SETTINGS,kind:'manor',family:'accumulated-estate',size:320,floors:3,seed:'CASES'});
+  const clean=auditArchitecture(p);
+  assert.deepEqual([...clean],[],'the plan does not pass its own audit');
+  // An ordinary room forced into a strip is rejected, and not by renaming it.
+  const strip=structuredClone(p),victim=strip.rooms.find(r=>r.kind==='bedroom')!;
+  victim.bounds={...victim.bounds,w:5,d:5+Math.ceil(4*4)};
+  assert.ok(auditArchitecture(strip).some(i=>i.includes(victim.name)&&i.includes('strip')),'a 4:1 chamber is accepted');
+  // A genuine long gallery is not: its own kind has its own proportions.
+  const galleries=p.rooms.filter(r=>r.kind==='gallery'||r.kind==='circulation');
+  const long=galleries.filter(r=>Math.max(r.bounds.w,r.bounds.d)>Math.min(r.bounds.w,r.bounds.d)*4);
+  assert.ok(long.length,'no long connector anywhere to test the gallery case against');
+  for(const g of long)assert.ok(!clean.some(i=>i.includes(g.name)),`${g.name} is rejected for being long`);
+  // A courtyard marked open exterior carries no floor or roof across it but an eave.
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind]){
+    const seed='SKY-0';
+    const q=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size:288,floors:3,seed});
+    for(const v of q.reservations.filter(v=>v.kind==='court')){
+      const b=v.bounds,inner={x:b.x+2,z:b.z+2,w:b.w-4,d:b.d-4};
+      if(inner.w<=0||inner.d<=0)continue;
+      const lid=q.blocks.find(k=>(k.kind==='roof'||k.kind==='floor')&&k.y>=v.fromY&&k.y<v.toY&&intersects(k,inner));
+      assert.ok(!lid,`${family.id}/${seed}: ${v.name} has ${lid?.kind} over it at Y ${lid?.y}`);
+    }
+    // A bay may not eat the room it came out of.
+    for(const a of q.articulation.filter(a=>a.role==='bay'||a.role==='oriel')){
+      const host=q.rooms.find(r=>a.roomIds.includes(r.id))!;
+      const across=a.side==='n'||a.side==='s';
+      assert.ok((across?a.bounds.w:a.bounds.d)*2<=(across?host.bounds.w:host.bounds.d),`${family.id}/${seed}: the ${a.role} leaves ${host.name} no core`);
+    }
+  }
+  // A formal quadrangle is not marked down for being regular: symmetry is a composition, not a defect.
+  const score=(family:Settings['family'],kind:Settings['kind'])=>[0,1,2]
+    .map(i=>generatePlan({...DEFAULT_SETTINGS,kind,family,size:320,floors:3,seed:`FORMAL-${i}`}).composition.score)
+    .reduce((a,b)=>a+b,0)/3;
+  const formal=(score('courtyard-castle','castle')+score('palace','castle')+score('courtyard-manor','manor'))/3;
+  const loose=(score('accumulated-estate','manor')+score('keep-bailey','castle')+score('annex-house','house'))/3;
+  assert.ok(formal>=loose-5,`the formal profiles score ${formal.toFixed(0)} against ${loose.toFixed(0)} for the loose ones`);
+});
+void test('the fixed-seed batch reports accepted-plan validity and search success apart',()=>{
+  // The defect this answers: one number that mixed how often the engine found a plan with whether the plans
+  // it found were sound, so a run that quietly returned broken geometry looked like a run that gave up.
+  assert.deepEqual(batchSettings(41),batchSettings(41),'the batch is not a fixed suite');
+  const spread=new Set(Array.from({length:120},(_,i)=>`${batchSettings(i).kind}/${batchSettings(i).family}/${batchSettings(i).size}/${batchSettings(i).floors}`));
+  assert.ok(spread.size>=100,`120 indices of the batch cover only ${spread.size} distinct settings`);
+  const out=regressionBatch(96);
+  assert.deepEqual(out.invalid.map(b=>`${b.settings} ${b.issues[0]}`),[],'the batch returned plans it calls valid that are not');
+  assert.ok(out.found>=out.settings*.95,`search found a plan for only ${out.found} of ${out.settings}: ${out.failures.slice(0,3).map(f=>f.reason).join('; ')}`);
+  assert.ok(out.meanNavigation>70&&out.meanComposition>70,`mean navigability ${out.meanNavigation}, mean composition ${out.meanComposition}`);
 });

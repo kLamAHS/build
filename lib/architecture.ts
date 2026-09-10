@@ -1654,6 +1654,9 @@ function buildGeometry(p:Plan){
     // An oriel hangs over open ground. One over the roof of the storey below it is a room in mid-air.
     if(hangs&&intersects(own.bounds,r))return false;
     if(p.components.some(o=>o.kind!=='court'&&o.id!==own.id&&intersects({x:o.bounds.x-shell,z:o.bounds.z-shell,w:o.bounds.w+2*shell,d:o.bounds.d+2*shell},r)))return false;
+    // A yard is composed open space, reserved before any floor was divided. A bay put out into one eats the
+    // space the composition was built to make, and its roof would cross a volume that is open to the sky.
+    if(p.components.some(o=>o.kind==='court'&&intersects(o.bounds,r)))return false;
     if(p.courts.some(ct=>{const b=ct.bounds,t=ct.thickness+2;
       return intersects({x:b.x-2,z:b.z-2,w:b.w+4,d:b.d+4},r)&&!(r.x>b.x+t&&r.x+r.w<b.x+b.w-t&&r.z>b.z+t&&r.z+r.d<b.z+b.d-t);}))return false;
     if(p.courts.some(ct=>ct.yards.some(yd=>intersects(yd.bounds,r))))return false;

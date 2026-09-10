@@ -12,7 +12,8 @@
     "test": "node --test lib/generator.test.ts lib/navigation.test.ts lib/blueprint-tools.test.ts lib/rendering.test.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "batch": "node lib/regression-batch.ts"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

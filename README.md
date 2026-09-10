@@ -10,6 +10,24 @@ Use Node 22.13 or later, `npm install`, and `npm run dev`. Run `npm run build` t
 
 `npm test` checks deterministic generation, 3,150 combinations of footprints and room geometry, aligned floors, size-dependent room counts, feature options, agent-tool input contracts, that every diagnostic overlay draws, and the circulation, composition, proportion and facade rules below. `npx tsc --noEmit` checks types.
 
+`npm run batch` runs the fixed-seed regression suite — 1,000 estates by default, `npm run batch 200` for a
+shorter run. It reports the two outcomes separately, and never adds them together:
+
+```
+settings 1000
+accepted-plan validity  1000/1000 (100.0%)
+search success          1000/1000 (100.0%)
+mean navigability 83.2  mean composition 91  mean rooms 90.7
+181s total, slowest 516ms
+```
+
+**Accepted-plan validity** is whether the plans the engine returns as valid actually are; **search success**
+is how often it finds an acceptable plan at all under its candidate budget. A run that quietly returned
+broken geometry and a run that honestly gave up are not the same failure, and one number would hide the one
+that matters. The exit code follows validity alone: giving up is a measurement, returning a broken plan is a
+defect. Index *i* of the batch always means the same estate, so a change that moves a plan shows up as a
+change in the batch rather than as a different sample.
+
 ## Circulation
 
 Circulation is planned before rooms are cut. Passage positions are chosen for the whole composition at
@@ -165,6 +183,30 @@ The hole a stair comes up through is a void, and is drawn as one: its own perime
 annotation, rather than an unexplained grey gap in the boards. The audit rejects a plan where a door opens
 onto one — the route test would have caught it as a missing floor, but a household walking off a landing into
 the stair well deserves to be told what it is.
+
+## What every stage is held to
+
+A rule that lives only in the stage that places something can be undone by a later stage without anything
+saying so. These are checked on the finished plan, and a candidate that fails one is rejected and another
+composition tried:
+
+- An **ordinary room** forced into a strip past 3.2:1, or one that has eaten more than 760 blocks of its
+  range, is rejected — not renamed to something the rule does not cover. A **gallery** is a kind with its own
+  proportions, so a genuinely long connector is accepted for what it is.
+- A **court** is open exterior for its whole reserved height. An eave may oversail it — that is what an eave
+  is — but a floor or a roof carried across it is a yard with a lid on. Nineteen yards in a 159-yard sample
+  had a roof reaching four to seven blocks in, because a bay was projecting into them; a projection is now
+  kept out of a yard, which is composed open space rather than ground to build on.
+- A **light** is never cut through a wall two rooms share, nor through the mass of a hearth or an oven.
+- A **bay** may not take more than half the wall of the room it comes out of: a projection that has eaten its
+  host is not a bay.
+- A **stair** rises one storey, lands at both ends of that rise, keeps both landings inside its own shaft, and
+  joins a room at each level it serves.
+- An **upper room** stands over the storey below it or over a cantilever that says so, and never in a
+  reservation another volume was given.
+- A **hall** keeps its long axis, its dais at the high end, its screens at the serving end, and its service
+  doors out of the private half.
+- A **yard** is a way through, not a dead end with a gate on it.
 
 ## Motifs, and what makes a hall a hall
 

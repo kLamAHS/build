@@ -57,6 +57,13 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
   // the room it was built for is a buttress with windows in it; a niche that goes through its wall is a hole.
   for(const a of plan.articulation){
     if(a.role==='chimney')continue;
+    if(a.role==='bay'||a.role==='oriel'){
+      // A projection that has eaten the room it came out of is not a bay: the host keeps a core of its own.
+      const host=plan.rooms.find(r=>a.roomIds.includes(r.id));
+      const across=a.side==='n'||a.side==='s';
+      const span=across?a.bounds.w:a.bounds.d,wall=host?(across?host.bounds.w:host.bounds.d):0;
+      if(host&&span*2>wall)issues.push(`The ${a.role} at X ${a.bounds.x}, Z ${a.bounds.z} takes ${span} of ${wall} blocks of ${host.name}, leaving it no core.`);
+    }
     if(a.role==='jetty'){
       // A jetty is carried on its joists, and the joists are drawn: without them it is a storey in mid-air.
       const b=a.bounds;
@@ -118,6 +125,16 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
     if(!plan.rooms.some(r=>st.roomIds.includes(r.id)&&r.floorY===st.fromY)||!plan.rooms.some(r=>st.roomIds.includes(r.id)&&r.floorY===st.toY))
       issues.push(`${where} does not join a room at each of the levels it serves.`);
   }
+  // A court is open exterior for its whole reserved height. An eave may oversail it — that is what an eave is
+  // — but a floor or a roof carried across it is a yard with a lid on, whatever the reservation says.
+  const EAVES=2;
+  for(const v of plan.reservations.filter(v=>v.kind==='court')){
+    const b=v.bounds,inner={x:b.x+EAVES,z:b.z+EAVES,w:b.w-2*EAVES,d:b.d-2*EAVES};
+    if(inner.w<=0||inner.d<=0)continue;
+    const over=plan.blocks.find(k=>(k.kind==='roof'||k.kind==='floor')&&k.y>=v.fromY&&k.y<v.toY
+      &&k.x<inner.x+inner.w&&k.x+k.w>inner.x&&k.z<inner.z+inner.d&&k.z+k.d>inner.z);
+    if(over)issues.push(`${v.name} is open to the sky, and ${over.kind==='roof'?'a roof':'a floor'} is carried across it at Y ${over.y}.`);
+  }
   // A yard the household can get into only one way is not a court but a gap with a gate on it: an open space
   // belongs to a composition when the buildings round it address it and it is a way through.
   for(const c of plan.components.filter(c=>c.kind==='court')){
@@ -125,6 +142,20 @@ export function auditArchitecture(plan:Plan,grid:SparseBlocks=voxelize(plan)):st
     if(!room)continue;
     const ways=plan.connections.filter(e=>e.includes(room.id)).length;
     if(ways<2)issues.push(`${c.name} is entered ${ways?'one way':'no way'} only, so it is a dead end rather than a court.`);
+  }
+  // A light belongs in a wall with open ground or a yard beyond it, and never in a mass of masonry. The
+  // facade pass refuses both when it places one; this is what keeps a later stage from adding one that does.
+  const level=new Map<number,Room[]>();
+  for(const r of plan.rooms)level.set(r.floorY,[...(level.get(r.floorY)??[]),r]);
+  for(const o of plan.openings.filter(o=>o.type==='window')){
+    const room=plan.rooms.find(r=>r.id===o.roomIds[0]);
+    if(!room)continue;
+    const cells=Array.from({length:o.width},(_,w)=>({x:o.x+(o.axis==='z'?w:0),z:o.z+(o.axis==='x'?w:0)}));
+    const others=(level.get(room.floorY)??[]).filter(r=>r.id!==room.id&&r.kind!=='court');
+    if(cells.some(c=>others.some(r=>c.x>r.bounds.x&&c.x<r.bounds.x+r.bounds.w&&c.z>r.bounds.z&&c.z<r.bounds.z+r.bounds.d)))
+      issues.push(`The light at X ${o.x}, Z ${o.z} is cut through a wall ${room.name} shares with the room behind it.`);
+    if(room.furniture.some(f=>(f.type==='hearth'||f.type==='oven')&&cells.some(c=>c.x>=f.x-1&&c.x<=f.x+f.w&&c.z>=f.z-1&&c.z<=f.z+f.d)))
+      issues.push(`The light at X ${o.x}, Z ${o.z} is cut through the fire in ${room.name}.`);
   }
   // ---- Motifs. What makes an arrangement that arrangement is checked, not assumed: a hall whose dais has
   // wandered out of its high end, or whose screens no longer stand at the serving end, is a long room with
