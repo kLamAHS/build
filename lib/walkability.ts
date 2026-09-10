@@ -62,16 +62,32 @@ export function canWalk(grid: SparseBlocks, a: Vec3, b: Vec3): boolean {
   for (const t of [0, .5, 1]) if (!bodyClear(grid, a.x + (b.x - a.x) * t, high, a.z + (b.z - a.z) * t)) return false;
   return true;
 }
-function floorSupport(grid: SparseBlocks, plan: Plan, x: number, y: number, z: number): boolean {
+/**
+ * Where a room's own floor plane is, by column. A three-block wall with a doorway through its outer face
+ * leaves masonry standing at floor level a course further in, and you walk over that as readily as over a
+ * board: a rule that only counts cells labelled `floor` reads it as a cliff and cuts the room off.
+ */
+function floorPlanes(plan: Plan): Map<string, number[]> {
+  const planes = new Map<string, number[]>();
+  for (const r of plan.rooms) for (let z = r.bounds.z; z <= r.bounds.z + r.bounds.d; z++) for (let x = r.bounds.x; x <= r.bounds.x + r.bounds.w; x++) {
+    if (!insidePolygon(x + .5, z + .5, r.polygon)) continue;
+    const k = `${x},${z}`, list = planes.get(k);
+    if (!list) planes.set(k, [r.floorY]); else if (!list.includes(r.floorY)) list.push(r.floorY);
+  }
+  return planes;
+}
+function floorSupport(grid: SparseBlocks, plan: Plan, planes: Map<string, number[]>, x: number, y: number, z: number): boolean {
   const kind = grid.kindAt(x, y, z), state = grid.stateAt(x, y, z);
   if (/:(water|lava|campfire)$/.test(state?.name ?? '')) return false;
   if (kind === 'floor' || kind === 'stair' || kind === 'ground' || state?.name.endsWith('_carpet')) return true;
+  if ((kind === 'wall' || kind === 'support' || kind === 'chimney') && planes.get(`${x},${z}`)?.includes(y)) return true;
   return kind === 'roof' && plan.components.some(c => c.roof === 'battlement' && y === c.topY && insidePolygon(x + .5, z + .5, c.polygon));
 }
 export function walkGraph(plan: Plan, grid: SparseBlocks, maxNodes = 1_000_000): WalkGraph {
   const nodes: WalkNode[] = [], columns = new Map<string, number[]>(), tested = new Set<string>(); let truncated = false;
+  const planes = floorPlanes(plan);
   grid.forEach((x, y, z) => {
-    if (truncated || !floorSupport(grid, plan, x, y, z)) return;
+    if (truncated || !floorSupport(grid, plan, planes, x, y, z)) return;
     const tops = [...new Set(collisionBoxes(grid.stateAt(x, y, z)).map(b => y + b[1] + b[4]))];
     for (const feet of tops) for (const dz of [0, .5, 1]) for (const dx of [0, .5, 1]) {
       const xx = x + dx, zz = z + dz, k = `${xx * 2},${Math.round(feet * 16)},${zz * 2}`;
@@ -82,12 +98,17 @@ export function walkGraph(plan: Plan, grid: SparseBlocks, maxNodes = 1_000_000):
       const ck = columnKey(xx, zz), list = columns.get(ck) ?? []; list.push(id); columns.set(ck, list);
     }
   });
-  const entrance = plan.openings.find(o => o.type === 'entrance'), maxEntryY = (entrance?.y ?? 1) + .1;
+  // Start at the door itself. `plan.entry` is where the approach begins, which in an authored composition can
+  // be fifty blocks away and six courses below the threshold — a place to arrive at, not one to set off from.
+  const entrance = plan.openings.find(o => o.type === 'entrance');
+  const at = entrance
+    ? { x: entrance.x + (entrance.axis === 'z' ? entrance.width / 2 : .5), z: entrance.z + (entrance.axis === 'x' ? entrance.width / 2 : .5), y: entrance.y }
+    : { x: plan.entry.x, z: plan.entry.z, y: 1 };
   let root = -1, distance = Infinity;
   for (const n of nodes) {
-    const d = Math.hypot(n.x - plan.entry.x, n.z - plan.entry.z);
-    if (d > 4 || n.y > maxEntryY || n.y < plan.minY) continue;
-    const score = d + Math.abs(n.y - maxEntryY) * .08;
+    const d = Math.hypot(n.x - at.x, n.z - at.z);
+    if (d > 4 || n.y > at.y + .1 || n.y < Math.max(plan.minY, at.y - 1.5)) continue;
+    const score = d + Math.abs(n.y - at.y) * .08;
     if (score < distance) { distance = score; root = n.id; }
   }
   const reached = new Uint8Array(nodes.length), graph: WalkGraph = { nodes, columns, reached, root, truncated };

@@ -10,8 +10,10 @@ import { buildingGlb } from './gltf.ts';
 import { openingTunnel, tunnelCells } from './building-repairs.ts';
 
 // A large authored reference exercises intersections and motifs together; it is not an architecture.ts candidate.
+// The reference is an authored composition, not a candidate the search produced, and its own documentation
+// says its navigation is uncertified — so its export skips the finished-building gate that the studio's does not.
 const reference=crownwardPlan(),sourceJSON=JSON.stringify(reference),model=buildDetailedModel(reference);
-const schematic=wholeBuilding(reference,model.grid);
+const schematic=wholeBuilding(reference,model.grid,{audited:false});
 
 void test('a complete reference castle receives several scales of architectural treatment',()=>{
   const counts=new Map<string,number>();for(const f of model.features)counts.set(f.kind,(counts.get(f.kind)??0)+1);
@@ -129,5 +131,5 @@ void test('GLB contains the original mesh buffers, floor ownership and material 
 
 void test('viewer-expanded vertical bounds do not trigger a different second export',()=>{
   const plan=architectureFixture(),a=buildDetailedModel(plan),viewerPlan={...plan,minY:a.minY,maxY:a.maxY};
-  assert.deepEqual(wholeBuilding(viewerPlan),wholeBuilding(plan,a.grid));
+  assert.deepEqual(wholeBuilding(viewerPlan,undefined,{audited:false}),wholeBuilding(plan,a.grid,{audited:false}));
 });

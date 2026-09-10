@@ -11,4 +11,4 @@ for(const [name,grid] of [['before',voxelize(plan)],['after',model.grid]] as con
   writeFileSync(`${out}/${name}-geometry.json`,JSON.stringify(meshes.map(m=>({positions:Array.from(m.positions),normals:Array.from(m.normals),indices:Array.from(m.indices),color:m.color??MATERIALS[m.material].color,roof:m.roof,floor:m.floor}))));
   console.log(name,grid.stats(),`${meshes.length} meshes`,`${meshes.reduce((s,m)=>s+m.indices.length/3,0)} triangles`,`${Math.round(performance.now()-start)}ms`);
 }
-writeFileSync(`${out}/architectural-detail-fixture.litematic`,await litematicaFile(wholeBuilding(plan,model.grid),1700000000000));
+writeFileSync(`${out}/architectural-detail-fixture.litematic`,await litematicaFile(wholeBuilding(plan,model.grid,{audited:false}),1700000000000));

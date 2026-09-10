@@ -336,8 +336,9 @@ anything. Half a block is a step; a whole one is a jump, and a jump is not a rou
 - Nowhere a player can stand is dark: block light, conservatively, with no daylight counted.
 
 It is a model, not the game: a conservative box, no jumping, no skylight. It will not certify that Minecraft
-agrees with it. What it will do is fail loudly when something is unbuildable, which is why the studio shows
-a **walkable** score beside navigability and composition.
+agrees with it. What it will do is fail loudly when something is unbuildable — the studio shows a **walkable**
+score beside navigability and composition, and the whole-building export refuses to write a schematic that
+fails, because a castle with a room you cannot reach is not something anyone wants pasted into a world.
 
 Three passes exist to answer it. `lib/building-repairs.ts` repairs the envelope — roofs that intrude into
 rooms, walls a later range drove through an earlier one's interior, ceilings, the knee wall under a deep eave,

@@ -94,6 +94,28 @@ shows, all of it in the package's own modules:
   its standing positions out of the graph's own column index, and the shaped-block mesher walks each shape's
   occupied span. Together those took the largest building from 9.9 s to compile, audit and mesh down to 3.6 s.
 
+The interior hotfix that followed carried the same integration problem — it was built on the modules as they
+arrived rather than as they were fixed — so three things were taken from it and the rest left alone:
+
+- `trapdoor()` is the package's: an open one hangs on the face opposite the one it faces, which is what the
+  vanilla model does and the reverse of what the earlier version assumed, and a closed one defaults to the
+  bottom of its cell, which is where a table top on fence legs belongs.
+- The whole-building export refuses to write a schematic that fails the finished-building audit. `audited:
+  false` exists only for the authored reference and the test fixtures, which are not generator output and
+  whose navigation their own documentation calls uncertified.
+- Portals are reconciled once more after the interior finishes, so a beam or a carpet cannot have the last
+  word over a declared doorway.
+
+Its own diagnosis — `furnishInteriors` being called with one argument — was already fixed when the modules
+were first wired up, and its orchestration reverts the six fixes that took the generator's own output from 84
+failing buildings to none, so it was not applied.
+
+The walking audit also starts at the door rather than at `plan.entry`: in an authored composition the entry
+can be the foot of an approach fifty blocks away and six courses below the threshold. And a full-cube top at a
+room's own floor level now counts as somewhere to stand — a three-block wall with a doorway through its outer
+face leaves masonry at floor level a course further in, and reading that as a cliff cut the Crown Keep off
+from its own door.
+
 ## Validation
 
 Run from the repository root:
