@@ -203,8 +203,10 @@ so it reads without a legend:
 
 Lay it out, and build up from it. A 512-block estate's outline is about 3 kB.
 
-**Complete building** is every block of every floor, **dressed** — see *Dressing a build* below. About 220 kB
-for the largest estate the generator makes, and half a second to prepare.
+**Complete building** is every block of every floor as the 3D view shows it — see *Building it, not blocking
+it out* below. About 180 kB for the largest estate the generator makes, and a second to prepare. The 3D view
+also has its own **Export 3D · GLB** button, which writes the same model as mesh geometry for anything that
+reads glTF: the complete building, not the cutaway you happen to be looking at.
 
 Both are gzipped NBT written by `lib/litematica.ts`, which writes the tags this one format needs and no
 others. Two deliberate choices are in there:
@@ -245,54 +247,68 @@ composition tried:
   doors out of the private half.
 - A **yard** is a way through, not a dead end with a gate on it.
 
-## Dressing a build
+## Building it, not blocking it out
 
-The generator settles what stands where. Until now the exporter settled what it was made of by mapping each
-of nine materials to one block, which produced a massing model: one grey stone, flat roofs of cubes, walls of
-solid glass, and — worse than any of that — no light anywhere in it. A castle you cannot see inside is a
+The generator settles what stands where. For a long time the exporter settled what it was made of by mapping
+each of nine materials to one block, and the 3D view coloured the same nine. That produced a massing model:
+one grey stone, roofs of stacked cubes, walls of solid glass, square battlements floating at the corners of a
+chamfered tower, and — worse than any of it — no light anywhere inside. A castle you cannot see inside is a
 castle full of monsters by the second night.
 
-`lib/dressing.ts` is the pass that answers that. Its rules come from reading two hand-built castles block by
-block and counting what is in them. Three things separate those from what a generator produces on its own:
+`lib/architectural-detail.ts` is the pass that answers that, and the important thing about it is that there is
+only **one** of it. `buildDetailedModel(plan)` returns the structural grid and a detailed grid; the worker
+meshes the detailed grid, the whole-building export writes the same one out, and so does the GLB button. What
+you turn around in the studio is what you paste into the world. Block states live in a sidecar on the grid
+(`lib/block-states.ts`), and the mesher gives each one its real shape — quarter-block for a stair or a slab,
+sixteenth-block for a chain, a pane or a bed — rather than a cube.
 
-**The stone is never one stone.** Between twelve and thirty-five stone blocks are in use, and they are not
-salt-and-pepper: a neighbouring block is the same one about half the time, where random mixing at that palette
-size would be three to eight per cent. So the stone here comes from a patchy field — a couple of blocks of one
-stone, then a couple of another — with about an eighth of it weathered to a cracked or mossy variant. Each
-kind of building has its own set: a castle is tuff and deepslate and hard grey, a house the cobble and stone
-of the fields round it. Corners take one stone all the way up, because a quoin is what tells the eye where
-the mass ends.
+It compiles architecture, not a second floor plan. Rooms, openings, stairs, routes, court reservations and
+explicit air cuts are all protected, and no non-roof structural cell may be replaced — so the plan you
+approved is still the plan, and the audits still hold. Floor drawings and outline schematics still read the
+structural grid.
 
-**A fifth of every block placed is trim**, concentrated in courses. So: a plinth carried one block proud of
-the wall and chamfered back with a course of stairs; a string course of projecting slabs at every storey
-line; a corbel table under the eaves, which is what stops a wall meeting a roof as two flat planes butted
-together; and roofs built out of stairs facing up the pitch rather than out of cubes.
+It works at three scales, and records what it actually placed in a feature manifest:
 
-**They are lit.** A hundred and fifty lanterns in a building thirty-seven blocks across. Every room now hangs
-lanterns from its ceiling on a six-block grid, and every fire is a fire: a hearth is brick with a lit campfire
-in it, an oven a furnace, a forge a blast furnace and an anvil.
+**Roof composition** (`lib/architectural-language.ts`). A tall tower gets a flared skirt, an octagonal glazed
+drum with a lantern in it, a steeper second roof and a supported finial — not one giant pyramid. Long ranges
+get dormers set into the slope and carved or timbered gable ends with tracery. A battlement tower wide enough
+to carry them gets corbelled corner bartizans. Every one of these is drafted in full and placed only if the
+whole motif fits: an adjoining range vetoes the drum rather than getting a hole cut through it.
 
-The rest of the fittings became what they are, too, since a room named for what happens in it should hold the
-thing that happens in it: bookshelves and a lectern or an enchanting table, a brewing stand, barrels, a
-crafting table, a bed, benches of stairs, glass **panes** rather than walls of glass block.
+**Façade bays.** Bases, capitals and corbel tables as continuous bands; engaged piers on halls, chapels and
+towers; hooded surrounds around every window and a carved portal with a banner over every door; heraldic
+hangings on blind tower bays; a developed gate arch and roof on each gatehouse, and a coped curtain wall.
 
-How it measures against the two references, counted the same way:
+**Material and contents.** Stone is never one stone — a patchy field three blocks across and two courses tall,
+because the hand-built castles this was measured against put the same stone above itself about half the time,
+where random mixing at that palette size would be a twelfth. Timber upstairs is oriented log; courtyard flags
+have a border and a grid; and every fitting is the thing it stands for: a lit campfire in a hearth, a furnace
+in an oven, a blast furnace and anvil at a forge, a brewing stand, bookshelves and a lectern — or the
+enchanting table, in the room programmed for one — beds in complete facing-matched pairs, and lanterns hung on
+real chains from a real overhead block, never in a doorway.
 
-| | Raidproof Castle | Skyhold Keep | Keepwright before | Keepwright now |
+Every state it can write existed in Java 1.16.5, which is the version the schematic file claims: a block name
+the client cannot resolve at the declared data version is not a nicer stone, it is a hole.
+
+How it measures against the two references, counted the same way on a 288-block courtyard castle:
+
+| | Raidproof Castle | Skyhold Keep | Blocked out | Now |
 |---|---|---|---|---|
-| stone blocks in use | 12 | 35 | 1 | **15** |
-| same block above | 56% | 42% | 100% | **55%** |
-| stairs | 14.4% | 7.0% | 0% | **10.5%** |
-| slabs | 12.6% | 8.0% | 0% | **5.1%** |
-| light sources | ~150 | many | **0** | **189** |
-| palette | 569 | 1128 | 9 | **113** |
+| stone blocks in use | 12 | 35 | 1 | **7** |
+| same block above | 56% | 42% | 100% | **52%** |
+| stairs | 14.4% | 7.0% | 0% | **12.7%** |
+| slabs | 12.6% | 8.0% | 0% | **3.4%** |
+| light sources | ~150 | many | 0 | **260** |
+| palette | 569 | 1128 | 9 | **56** |
 
-Slabs are still the thin one, and the palette is a fifth the size of a hand-built castle's — there is no
-furniture variety, no banners, no vines, no broken masonry. What is here is the structure of a good build
-rather than the finish of one.
+Slabs are still the thin one, and the palette is a fraction of a hand-built castle's — there is no furniture
+variety, no vines, no deliberately broken masonry. What is here is the structure of a good build rather than
+the finish of one.
 
-**The studio's own 3D view is not dressed.** It still colours by the nine materials, because it renders from
-the voxel grid and the dressing is a separate pass over it. The export is what changed.
+`lib/showcase-plan.ts` is an authored composition, **not** a candidate the search produced, for looking at all
+of this at castle scale: `npm run showcase:architecture -- ./exports/crownward` writes its `.litematic`, its
+GLB and a report of every feature placed. `docs/3d-redesign.md` records what the compiler promises and what
+was measured of it.
 
 ## Choosing between the compositions a seed made
 
