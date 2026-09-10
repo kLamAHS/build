@@ -502,10 +502,26 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     const pieces:{rect:Rect;name:string;kind:RoomKind;principal:boolean}[]=[];
     if(area.w<MIN_ROOM||area.d<MIN_ROOM||!program.length)return {pieces,next:from};
     const depth=Math.max(1,(along==='x'?area.d:area.w)-1),run=along==='x'?area.w:area.d;
+    // Past the end of the programme a long range repeats what a household really has more than one of — a
+    // store, a lodging chamber — and never its workrooms. A second larder is a larder; a second bakehouse is
+    // a programme that has run out of things to call a room, and the numeral on it says so.
+    const spare=program.slice(1),keeps=([,kind]:[string,RoomKind])=>kind==='storage'||kind==='bedroom';
+    const again=[...spare.filter(keeps),...spare.filter(e=>!keeps(e))];
     let at=along==='x'?area.x:area.z,left=run,index=from;
     while(left>=MIN_ROOM&&index<from+24){
-      // Past the end of the programme a long range repeats its lesser rooms, never its principal one.
-      const [name,kind]=program[index<program.length?index:1+(index-program.length)%Math.max(1,program.length-1)];
+      // Past the programme, take the next thing this range is willing to have another of. A store or a
+      // chamber always is; a workroom only if the range has not had one yet, because a range with a
+      // brewhouse and a second brewhouse is a programme that has run out of things to call a room.
+      let pick=index<program.length?program[index]:undefined;
+      if(!pick&&again.length){
+        const start=(index-program.length)%again.length;
+        for(let k=0;k<again.length&&!pick;k++){
+          const next=again[(start+k)%again.length];
+          if(keeps(next)||!used.has(next[0]))pick=next;
+        }
+        pick=pick??again[start];
+      }
+      const [name,kind]=pick??program[0];
       const fit=ROOM_FIT[kind];
       const want=Math.round(depth*fit.share)+1;
       const least=Math.max(MIN_ROOM,Math.round(depth/fit.aspect)+1);

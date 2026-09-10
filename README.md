@@ -246,6 +246,30 @@ composition tried:
   doors out of the private half.
 - A **yard** is a way through, not a dead end with a gate on it.
 
+## What a range does when it runs out of programme
+
+Past the end of its programme a long range repeated whatever came second, so an estate could hold a Bakehouse,
+a Bakehouse 2 and a Bakehouse 3. That is not a household with three bakehouses; it is a programme that has run
+out of things to call a room, and the numeral on it says so.
+
+A range now repeats only what a household really has more than one of. Stores and lodging chambers come
+first, then anything else the programme lists, and a workroom is taken only if the range has not had one yet.
+The principal room is never repeated at all. Across a 108-plan sample no workroom anywhere carries a numeral:
+no *Bakehouse 3*, no *Scullery 3*, no *Laundry 2*, no *Great chamber 4*. Stores and chambers still come in
+runs, because a service court does hold several larders and a lodging range does hold several chambers.
+
+**§7.4's repair order is only half implemented, and deliberately so.** Of the six steps it asks for, the
+generator has the first — a remainder too short to be a room is given to the room before it — and the last —
+reject the composition and try another. The four in between (select another suite or motif variant, add a
+genuinely required support function, shorten the wing or turn the residue into exterior space, move
+accommodation to another level) are not there.
+
+I tried capping how many rooms a rank may hold and giving the remainder to the last room, which is step one
+applied harder. With steps two to five missing, step six then fired for every candidate and generation failed
+outright: `Pantry 3 has swallowed 884 blocks of its range`. A naming blemish had become a broken generator.
+The cap came back out. The honest position is that a range longer than its programme has to be divided into
+something, and repeating a store is the least bad answer available until the middle of that order exists.
+
 ## A fitting is a fitting
 
 A great hall was furnished with one dining table sixty-one blocks long, and a bench sixty-one blocks long

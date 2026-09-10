@@ -925,3 +925,40 @@ void test('a fitting is a fitting, and a larger room gets more of them',()=>{
   assert.ok(high.z<=dais.z+dais.d+1,'the high table does not stand at the high end');
   assert.ok(Math.abs((high.x+high.w/2)-(hall.bounds.x+hall.bounds.w/2))<=2,'the high table is not centred on the hall');
 });
+
+void test('a household has one bakehouse, and as many larders as it needs',()=>{
+  // The defect this answers: past the end of its programme a long range repeated whatever came second, so
+  // an estate could hold a Bakehouse, a Bakehouse 2 and a Bakehouse 3, which is a programme that has run out
+  // of things to call a room rather than a household with three bakehouses.
+  const numbered=new Map<string,number>();let stores=0,chambers=0,rooms=0;
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind])for(const size of [160,288,416]){
+    const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size,floors:3,seed:'PROGRAMME'});
+    const tag=`${family.id}/${size}`;
+    const names=new Set(p.rooms.map(r=>r.name));
+    for(const r of p.rooms){
+      rooms++;
+      const at=r.name.match(/ (\d+)$/);
+      if(!at)continue;
+      const base=r.name.slice(0,-at[0].length),n=Number(at[1]);
+      // A second of something implies a first of it: the numeral counts, it does not name.
+      assert.ok(names.has(base),`${tag}: ${r.name} with no ${base}`);
+      numbered.set(base,Math.max(numbered.get(base)??0,n));
+      if(r.kind==='storage')stores++;
+      if(r.kind==='bedroom')chambers++;
+    }
+    // A workroom is singular within its own range. Two service courts may each brew; one range may not hold
+    // a brewhouse and a second brewhouse, which is what running off the end of a programme used to produce.
+    const ranks=new Map<string,string[]>();
+    for(const r of p.rooms.filter(r=>r.kind==='service')){
+      const key=`${r.componentId}:${r.floorY}`;
+      ranks.set(key,[...(ranks.get(key)??[]),r.name.replace(/ \d+$/,'')]);
+    }
+    for(const [key,work] of ranks)
+      assert.equal(new Set(work).size,work.length,`${tag}: the rank at ${key} holds ${work.join(', ')}`);
+  }
+  assert.ok(rooms>1500,`only ${rooms} rooms surveyed`);
+  // The rule is which things repeat, not that nothing does: stores and lodging chambers still come in runs.
+  assert.ok(stores>60,`only ${stores} repeated stores, so a service range names every shelf differently`);
+  assert.ok(chambers>12,`only ${chambers} repeated chambers, so a lodging range has one bed in it`);
+  assert.ok([...numbered.values()].some(n=>n>=3),'nothing anywhere reaches a third of its kind');
+});
