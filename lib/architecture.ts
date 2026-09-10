@@ -1,4 +1,4 @@
-import { FAMILIES, rectPolygon, intersects, insidePolygon, componentFootprint, type Reservation, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Motif, type MotifPort, type Suite, type Court, type GenerationResult, type BlockBox } from './model.ts';
+import { FAMILIES, FITTINGS, rectPolygon, intersects, insidePolygon, componentFootprint, type Reservation, type Settings, type Plan, type Rect, type Point, type Room, type RoomKind, type BuildingComponent, type ComponentKind, type Opening, type Motif, type MotifPort, type Suite, type Court, type GenerationResult, type BlockBox } from './model.ts';
 import { isCirculation, navigationReport, articulationPoints, HALL_END, IMPROPER_DOORS, ROOM_PRIVACY } from './navigation.ts';
 import { auditArchitecture } from './architectural-audit.ts';
 import { bayLines, compositionReport } from './composition.ts';
@@ -502,10 +502,26 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     const pieces:{rect:Rect;name:string;kind:RoomKind;principal:boolean}[]=[];
     if(area.w<MIN_ROOM||area.d<MIN_ROOM||!program.length)return {pieces,next:from};
     const depth=Math.max(1,(along==='x'?area.d:area.w)-1),run=along==='x'?area.w:area.d;
+    // Past the end of the programme a long range repeats what a household really has more than one of — a
+    // store, a lodging chamber — and never its workrooms. A second larder is a larder; a second bakehouse is
+    // a programme that has run out of things to call a room, and the numeral on it says so.
+    const spare=program.slice(1),keeps=([,kind]:[string,RoomKind])=>kind==='storage'||kind==='bedroom';
+    const again=[...spare.filter(keeps),...spare.filter(e=>!keeps(e))];
     let at=along==='x'?area.x:area.z,left=run,index=from;
     while(left>=MIN_ROOM&&index<from+24){
-      // Past the end of the programme a long range repeats its lesser rooms, never its principal one.
-      const [name,kind]=program[index<program.length?index:1+(index-program.length)%Math.max(1,program.length-1)];
+      // Past the programme, take the next thing this range is willing to have another of. A store or a
+      // chamber always is; a workroom only if the range has not had one yet, because a range with a
+      // brewhouse and a second brewhouse is a programme that has run out of things to call a room.
+      let pick=index<program.length?program[index]:undefined;
+      if(!pick&&again.length){
+        const start=(index-program.length)%again.length;
+        for(let k=0;k<again.length&&!pick;k++){
+          const next=again[(start+k)%again.length];
+          if(keeps(next)||!used.has(next[0]))pick=next;
+        }
+        pick=pick??again[start];
+      }
+      const [name,kind]=pick??program[0];
       const fit=ROOM_FIT[kind];
       const want=Math.round(depth*fit.share)+1;
       const least=Math.max(MIN_ROOM,Math.round(depth/fit.aspect)+1);
@@ -733,10 +749,13 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       [['Household lodging','bedroom'],['Servants’ hall','service'],['Usher’s room','study'],['Livery store','storage']],
       [['Retainers’ lodging','bedroom'],['Mess room','service'],['Armourer’s room','service'],['Kit store','storage']],
       [['Chaplain’s lodging','bedroom'],['Study','study'],['Almoner’s room','study'],['Book room','storage']],
+      [['Physician’s lodging','bedroom'],['Sick room','bedroom'],['Herb store','storage'],['Bath house','service']],
     ],
     domestic:[
       [['Solar','study'],['Withdrawing room','study'],['Household dining','service'],['Parlour','study'],['Pantry','storage']],
+      [['Library','study'],['Reading room','study'],['Map room','study'],['Book store','storage'],['Muniment room','storage']],
       [['Guest hall','service'],['Steward’s lodging','study'],['Guest parlour','study'],['Household store','storage'],['Linen room','storage']],
+      [['Still room','service'],['Herb room','storage'],['Preserve store','storage'],['Plate room','storage']],
       [['Nursery','bedroom'],['Schoolroom','study'],['Nurse’s chamber','bedroom'],['Toy store','storage']],
       [['Music room','study'],['Long parlour','study'],['Card room','study'],['Instrument store','storage']],
     ],
@@ -745,6 +764,37 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       [['Watch room','service'],['Bowyer’s room','service'],['Signal loft','storage'],['Shot store','storage']],
       [['Treasury','storage'],['Clerk’s room','study'],['Seal room','study'],['Strong room','storage']],
     ],
+  };
+  /**
+   * What a player needs a room for as against what a household did. These are held apart from the trades
+   * above because they answer to a different question — not what this house was for, but what you will have
+   * to do in it — and they are only built when the estate is asked for them. Everything else about them is
+   * ordinary: they take their place in the programme, get their proportions from their kind, are furnished
+   * with the fixture they exist for, and are held to the same audit as any other room.
+   */
+  const ESSENTIAL:Partial<Record<ComponentKind,[string,RoomKind][][]>>={
+    // A library belongs with an enchanting room — the shelves are the point of both — so the group carries
+    // one, and a plan with the essentials on does not lose the library it would otherwise have had.
+    domestic:[[['Enchanting room','study'],['Library','study'],['Bookshelf store','storage'],['Scribe’s room','study'],['Rune store','storage']]],
+    service:[[['Brewing room','service'],['Ingredient store','storage'],['Potion store','storage'],['Water room','service']]],
+    workshop:[
+      [['Smelting house','service'],['Ore store','storage'],['Fuel store','storage'],['Anvil floor','service']],
+      [['Storage hall','storage'],['Sorting room','service'],['Crate store','storage'],['Bale store','storage']],
+    ],
+    lodging:[[['Trading hall','service'],['Merchants’ lodging','bedroom'],['Ledger room','study'],['Tally room','study']]],
+    tower:[[['Enchanting room','study'],['Reading room','study'],['Rune store','storage'],['Ore store','storage']]],
+  };
+  /**
+   * The fixture a room is built around, where it has one. A room is named for what happens in it, so the
+   * name is what says which fixture it wants — the same way the screens passage is known by its name.
+   */
+  const FIXTURES:Record<string,Exclude<Room['furniture'][number]['type'],'dais'>>={
+    'Enchanting room':'lectern','Library':'lectern','Reading room':'lectern','Map room':'lectern',
+    'Scribe’s room':'lectern','Scriptorium':'lectern','Book room':'lectern','Muniment room':'lectern',
+    'Brewing room':'still','Still room':'still','Potion store':'still','Water room':'still',
+    'Smelting house':'forge','Anvil floor':'forge','Smithy':'forge','Farrier’s shop':'forge',
+    'Storage hall':'crate','Crate store':'crate','Bale store':'crate','Ore store':'crate',
+    'Fuel store':'crate','Sorting room':'crate','Trading hall':'crate','Goods store':'crate',
   };
   /**
    * What a range holds above its ground floor. An upper storey that is bedchambers whatever the range is
@@ -770,14 +820,27 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       [['Store loft','storage'],['Journeyman’s room','bedroom'],['Sail loft','storage'],['Rope store','storage']],
     ],
   };
+  /**
+   * A range longer than one trade takes the next trade rather than a second of what it already has. The
+   * variants are groups — a kitchen group, a brewhouse group, a laundry group — so a range that runs past
+   * the end of one continues into the next, starting at its own. That is §7.4's second repair, choosing
+   * another variant, reached long before its last, which is to throw the composition away.
+   */
+  const trades=(list:[string,RoomKind][][],at:number)=>{
+    const start=((at%list.length)+list.length)%list.length;
+    return [...list.slice(start),...list.slice(0,start)].flat();
+  };
   function programFor(c:BuildingComponent,f:number):[string,RoomKind][]{
     if(f<0)return [['Wine cellar','storage'],['Root store','storage'],['Strong room','storage'],['Buttery store','storage'],['Ice store','storage']];
-    const rank=rankInKind.get(c.id)??0,variants=VARIANTS[c.kind];
-    if(f===0&&variants)return variants[rank%variants.length];
+    const rank=rankInKind.get(c.id)??0,base=VARIANTS[c.kind],extra=s.essentials?ESSENTIAL[c.kind]:undefined;
+    // The essential groups go in behind the first trade rather than after the last, so that a house with one
+    // service range still has somewhere to brew and a small manor still has somewhere to enchant.
+    const variants=base?extra?[base[0],...extra,...base.slice(1)]:base:undefined;
+    if(f===0&&variants)return trades(variants,rank);
     if(c.kind==='tower'&&f>0)return [[f===c.storeys-1?'Tower chamber':'Solar chamber','bedroom'],['Antechamber','study'],['Wardrobe','storage'],['Guest chamber','bedroom'],['Linen room','storage']];
     if(f===c.storeys-1&&f>1)return [['Gabled bedchamber','bedroom'],['Wardrobe & study','study'],['Bedchamber','bedroom'],['Linen room','storage'],['Private study','study']];
     const above=UPPER[c.kind];
-    if(above)return above[(rank+f-1)%above.length];
+    if(above)return trades(above,rank+f-1);
     return [['Bedchamber','bedroom'],['Guest chamber','bedroom'],['Linen room','storage'],['Nurse’s chamber','bedroom'],['Wardrobe','storage']];
   }
   for(const c of components)if(c.storeys>1&&c.kind!=='hall'&&c.kind!=='court'&&!canStair(c)){c.storeys=1;c.topY=6;}
@@ -919,7 +982,8 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
           if(slot.principal)chamber=made;
         }
         if(notch&&chamber){
-          const [name,kind]=[...program].reverse().find(([,k])=>k==='storage')??program[program.length-1];
+          // The closet is named for this chamber's own store, which is the first the programme lists.
+          const [name,kind]=program.find(([,k])=>k==='storage')??program[program.length-1];
           const seen=(used.get(name)??0)+1;
           suiteOf(chamber,room(c,seen>1?`${name} ${seen}`:name,kind,notch,y,ceiling));
         }
@@ -1263,7 +1327,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
     for(const st of p.stairs.filter(st=>st.roomIds.includes(r.id)))ports.push(st.landings[r.floorY===st.fromY?0:1]);
     const routesSurvive=(extra:Rect)=>{
       if(ports.length<2)return true;
-      const rb=r.bounds,blocked=[...r.furniture,extra];
+      const rb=r.bounds,blocked=[...r.furniture.filter(f=>f.type!=='dais'),extra];
       const walkable=(px:number,pz:number)=>{
         if(px<=rb.x||pz<=rb.z||px+1>=rb.x+rb.w||pz+1>=rb.z+rb.d)return false;
         for(let dx=0;dx<2;dx++)for(let dz=0;dz<2;dz++){
@@ -1289,7 +1353,7 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       if(o.axis==='x')return {x:inward?o.x:o.x-3,z:o.z-1,w:4,d:o.width+2};
       return {x:o.x-1,z:inward?o.z:o.z-3,w:o.width+2,d:4};
     });
-    const addFurniture=(type:Room['furniture'][number]['type'],x:number,z:number,w:number,d:number,h=1)=>{
+    const addFurniture=(type:Room['furniture'][number]['type'],x:number,z:number,w:number,d:number,h=1,ignoreApproach=false)=>{
       if(w<=0||d<=0)return;
       const b=r.bounds;
       const fits=(at:Point)=>{
@@ -1297,21 +1361,60 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
         if(at.x<=b.x||at.z<=b.z||at.x+w>=b.x+b.w||at.z+d>=b.z+b.d)return false;
         for(const [cx,cz] of [[at.x+.5,at.z+.5],[at.x+w-.5,at.z+.5],[at.x+.5,at.z+d-.5],[at.x+w-.5,at.z+d-.5]])
           if(!insidePolygon(cx,cz,r.polygon))return false;
-        return !r.furniture.some(f=>intersects(f,box))&&!approaches.some(a=>intersects(a,box));
+        // A dais is a raised floor. Things stand on it and households walk over it, so it neither excludes
+        // what stands on it the way a table would, nor blocks the approach to a door the way a chest would.
+        if(type==='dais'||ignoreApproach)return !r.furniture.some(f=>f.type!=='dais'&&intersects(f,box));
+        return !r.furniture.some(f=>f.type!=='dais'&&intersects(f,box))&&!approaches.some(a=>intersects(a,box));
       };
       const tried:Point[]=[];
       if(fits({x,z}))tried.push({x,z});
       if(!generous)for(let px=b.x+1;px+w<b.x+b.w;px++)for(let pz=b.z+1;pz+d<b.z+b.d;pz++)if(fits({x:px,z:pz}))tried.push({x:px,z:pz});
       tried.sort((m,n)=>(Math.abs(m.x-x)+Math.abs(m.z-z))-(Math.abs(n.x-x)+Math.abs(n.z-z))||m.x-n.x||m.z-n.z);
       for(const at of tried.slice(0,8)){
-        if(!routesSurvive({...at,w,d}))continue;
-        r.furniture.push({type,...at,w,d,y:r.floorY+1,h,material:9});break;
+        // A dais never closes a route, so it is never tested against one: it is the floor, one step up.
+        if(type!=='dais'&&!routesSurvive({...at,w,d}))continue;
+        // What a fitting is made of, so the block export builds a hearth out of brick and a bench out of
+        // timber rather than making the whole household's furniture one material.
+        const made=type==='hearth'||type==='oven'||type==='forge'||type==='still'?8:type==='well'||type==='dais'?1:9;
+        r.furniture.push({type,...at,w,d,y:r.floorY+1,h,material:made});break;
       }
     };
+    /** A row of shelves along a wall, each one a shelf and a gap to reach between them. */
+    const shelfRun=(x:number,z:number,run:number)=>{
+      const wide=FITTINGS.shelf.long;
+      for(let at=0;at+wide<=run;at+=wide+2)addFurniture('shelf',x+at,z,wide,1,2);
+      if(run<wide&&run>=2)addFurniture('shelf',x,z,run,1,2);
+    };
+    // The fixture a room exists for goes in before anything else it is furnished with: a room with a forge
+    // in it is a smelting house, and the bench and the stores are what fit round the forge.
+    const fixture=FIXTURES[r.name.replace(/ \d+$/,'')];
+    if(fixture&&r.kind!=='hall'&&r.kind!=='court'){
+      const fit=FITTINGS[fixture],wide=b.w>=b.d;
+      const fw=Math.min(wide?fit.long:fit.short,Math.max(1,b.w-4)),fd=Math.min(wide?fit.short:fit.long,Math.max(1,b.d-4));
+      addFurniture(fixture,b.x+2,b.z+2,fw,fd,fixture==='forge'?2:1);
+    }
     if(r.kind==='hall'){
-      const mid=b.x+Math.floor(b.w/2),high=b.z+2,length=Math.max(6,b.d-14);
-      addFurniture('dais',b.x+3,high,Math.max(6,b.w-6),3);
-      addFurniture('table',mid-Math.floor(Math.max(4,b.w-12)/2),high+1,Math.max(4,b.w-12),1);
+      const mid=b.x+Math.floor(b.w/2),high=b.z+2;
+      // The corners of the high end are cut back, and a platform the width of the hall puts its own corners
+      // exactly where the cant took the floor away. It is narrowed until it fits rather than dropped: a hall
+      // with no dais has no high end, and a hall with no high end is a long room with tables in it.
+      for(let wide=Math.max(6,b.w-6);wide>=6;wide-=2){
+        addFurniture('dais',b.x+Math.floor((b.w-wide)/2),high,wide,3);
+        if(r.furniture.some(f=>f.type==='dais'))break;
+      }
+      // The high table is a table: one board of the size a board is, standing on the dais. It goes on the
+      // centre line where the centre line is free and slides along the dais where it is not, because a hall
+      // whose high end has no table at it has no high end.
+      const top=Math.min(FITTINGS.table.long,Math.max(4,b.w-8));
+      const platform=r.furniture.find(f=>f.type==='dais');
+      const spots=[mid-Math.floor(top/2)];
+      if(platform)for(let x=platform.x+1;x+top<=platform.x+platform.w-1;x++)spots.push(x);
+      spots.sort((m,n)=>Math.abs(m+top/2-mid)-Math.abs(n+top/2-mid)||m-n);
+      const seated=()=>r.furniture.some(f=>f.type==='table');
+      for(const at of spots){addFurniture('table',at,high+1,top,1);if(seated())break;}
+      // Where every spot on the dais falls in the swing of a door, the board still goes on the dais: the
+      // route test is what actually protects the way through, and that one still has to pass.
+      if(!seated())for(const at of spots){addFurniture('table',at,high+1,top,1,1,true);if(seated())break;}
       // The hall's hearth strategy, and the older of the two arrangements is not the poorer one. An open
       // hearth stands in the middle of the floor and vents through a louver in the roof, which is what a
       // hall retained from an earlier build still has; a later hall takes a fireplace against its flank
@@ -1322,9 +1425,17 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       else addFurniture('hearth',b.x+1,high+6,2,Math.min(5,Math.max(2,b.d-high-10)),2);
       // A flank with no room for a fireplace is a hall with an open hearth, not a hall with no fire.
       if(!r.furniture.some(f=>f.type==='hearth'))addFurniture('hearth',mid-1,high+6,2,2,1);
-      const bench=(x:number)=>{addFurniture('table',x,high+9,2,length);addFurniture('bench',x-1,high+9,1,length);addFurniture('bench',x+2,high+9,1,length);};
-      bench(b.x+4);
-      if(b.w>=16)bench(b.x+b.w-6);
+      // The household's dining is a repeated trestle — a board, a bench either side, and room to get round
+      // the ends of it — laid down the hall as many times as the hall is long. A longer hall seats more
+      // boards; it does not seat one longer board, which is a shelf with people at it.
+      const BOARD=FITTINGS.table.long,GAP=3,from=high+9,run=b.z+b.d-2-from;
+      const boards=Math.max(1,Math.floor((run+GAP)/(BOARD+GAP)));
+      const aisle=(x:number)=>{for(let i=0;i<boards;i++){
+        const z=from+i*(BOARD+GAP);
+        addFurniture('table',x,z,2,BOARD);addFurniture('bench',x-1,z,1,BOARD);addFurniture('bench',x+2,z,1,BOARD);
+      }};
+      aisle(b.x+4);
+      if(b.w>=16)aisle(b.x+b.w-6);
     }
     else if(r.kind==='bedroom'){addFurniture('bed',b.x+2,b.z+2,Math.min(3,b.w-3),Math.min(4,b.d-3));addFurniture('shelf',b.x+b.w-2,b.z+2,1,Math.min(3,b.d-3),2);}
     else if(r.kind==='service'){
@@ -1338,12 +1449,14 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
         if(b.d>9)addFurniture('hearth',b.x+2,b.z+b.d-3,3,1,2);
       }
     }
-    else if(r.kind==='study'){addFurniture('desk',b.x+2,b.z+2,3,2);addFurniture('shelf',b.x+2,b.z+b.d-2,Math.max(2,b.w-4),1,2);}
-    else if(r.kind==='storage'){addFurniture('shelf',b.x+2,b.z+2,Math.max(2,b.w-4),1,2);if(b.d>8)addFurniture('shelf',b.x+2,b.z+b.d-2,Math.max(2,b.w-4),1,2);}
+    // A shelf is a shelf: a wall gets a row of them with a gap to reach between, not one shelf the length
+    // of the wall. The same rule as the boards, for the same reason.
+    else if(r.kind==='study'){addFurniture('desk',b.x+2,b.z+2,3,2);shelfRun(b.x+2,b.z+b.d-2,b.w-4);}
+    else if(r.kind==='storage'){shelfRun(b.x+2,b.z+2,b.w-4);if(b.d>8)shelfRun(b.x+2,b.z+b.d-2,b.w-4);}
     else if(r.kind==='court'){
       addFurniture('well',b.x+Math.floor(b.w/2)-1,b.z+Math.floor(b.d*.62),3,3,2);
     }
-    else if(r.kind==='sacred'){addFurniture('altar',b.x+5,b.z+3,Math.max(3,b.w-10),2);for(let z=b.z+8;z<b.z+b.d-3;z+=3){addFurniture('bench',b.x+2,z,4,1);addFurniture('bench',b.x+b.w-6,z,4,1);}}
+    else if(r.kind==='sacred'){addFurniture('altar',b.x+Math.floor((b.w-Math.min(FITTINGS.altar.long,Math.max(3,b.w-10)))/2),b.z+3,Math.min(FITTINGS.altar.long,Math.max(3,b.w-10)),2);for(let z=b.z+8;z<b.z+b.d-3;z+=3){addFurniture('bench',b.x+2,z,4,1);addFurniture('bench',b.x+b.w-6,z,4,1);}}
   }
   for(const y of [...new Set(p.rooms.map(r=>r.floorY))].sort((a,b)=>a-b)){
     // A floor's voids are not worked out again here: they are the reservations that reach this level, so a
@@ -1873,7 +1986,9 @@ function buildGeometry(p:Plan){
       box({x:b.x+3,z:b.z+3+j,w:2,d:1},st.fromY+j+2,3,0,'air',st.componentId);
     }
   }
-  for(const r of p.rooms)for(const f of r.furniture)box(f,f.y,f.h,f.material,'furniture',r.componentId);
+  // A dais is the floor of the high end, one step up in the reading and level with it in the walking: it is
+  // laid in the floor course rather than on top of it, so nothing has to climb it to reach the private door.
+  for(const r of p.rooms)for(const f of r.furniture)box(f,f.type==='dais'?f.y-1:f.y,f.h,f.material,'furniture',r.componentId);
   // A hall's fireplace gets its flue before a service range's does: the stack over the household's own fire
   // is the one that reads on the elevation, and the budget of stacks is not large.
   const stackable=p.components.filter(c=>c.kind==='service'||c.kind==='hall'||c.kind==='domestic');

@@ -1,11 +1,30 @@
 export type BuildKind='castle'|'manor'|'house';
 export type Family='auto'|'crosswing'|'tower-residence'|'courtyard-manor'|'accumulated-estate'|'keep-bailey'|'tower-cluster'|'palace'|'double-ward'|'courtyard-castle'|'hall-house'|'merchant-house'|'annex-house';
-export type Settings={kind:BuildKind;family:Family;size:number;floors:number;organic:number;courtyard:boolean;chapel:boolean;garden:boolean;cellar:boolean;seed:string};
+export type Settings={kind:BuildKind;family:Family;size:number;floors:number;organic:number;courtyard:boolean;chapel:boolean;garden:boolean;cellar:boolean;essentials:boolean;seed:string};
 export type Point={x:number;z:number};
 export type Rect=Point & {w:number;d:number};
 export type RoomKind='hall'|'bedroom'|'service'|'sacred'|'storage'|'study'|'circulation'|'stairs'|'gallery'|'court';
 export type ComponentKind='hall'|'domestic'|'service'|'tower'|'chapel'|'gatehouse'|'workshop'|'lodging'|'court';
-export type Furniture=Rect & {y:number;h:number;type:'table'|'bench'|'bed'|'shelf'|'hearth'|'desk'|'altar'|'oven'|'well'|'dais'|'seat';material:number};
+export type Furniture=Rect & {y:number;h:number;type:'table'|'bench'|'bed'|'shelf'|'hearth'|'desk'|'altar'|'oven'|'well'|'dais'|'seat'|'lectern'|'still'|'forge'|'crate';material:number};
+/**
+ * What a fitting is, and the room you need beside it to use it. A bed is a bed whatever the size of the
+ * chamber, so an activity is a composition of repeated fittings rather than one fitting stretched to the
+ * wall: a longer hall seats more boards, not one longer board. `clear` is the space on the side that faces
+ * the room — where you stand to sleep in it, sit at it, or work at it.
+ *
+ * The dais is the exception and is not listed: it is a raised floor rather than a thing you could move, and
+ * spanning the high end is what it is for.
+ */
+export type Fitting={long:number;short:number;clear:number};
+export const FITTINGS:Record<Exclude<Furniture['type'],'dais'>,Fitting>={
+  table:{long:8,short:2,clear:1},bench:{long:8,short:1,clear:0},bed:{long:4,short:3,clear:1},
+  shelf:{long:4,short:1,clear:1},hearth:{long:5,short:3,clear:1},desk:{long:3,short:2,clear:1},
+  altar:{long:4,short:2,clear:1},oven:{long:3,short:3,clear:1},well:{long:3,short:3,clear:1},
+  seat:{long:5,short:1,clear:1},
+  // The fixtures a room is built around rather than furnished with: a stand to read or enchant at, a still
+  // to brew over, a forge to smelt and beat at, and the crates a store is a store because of.
+  lectern:{long:2,short:2,clear:1},still:{long:3,short:2,clear:1},forge:{long:4,short:3,clear:1},crate:{long:3,short:2,clear:1},
+};
 export type Room={id:string;name:string;kind:RoomKind;componentId:string;suiteId?:string;bounds:Rect;polygon:Point[];holes:Rect[];floorY:number;ceilingY:number;area:number;description:string;furniture:Furniture[]};
 /** Rooms that belong to one occupant and are entered as a set: a chamber with its own wardrobe or garderobe. */
 export type Suite={id:string;name:string;kind:'lodging'|'lord'|'service'|'gate';roomIds:string[];headId:string};
@@ -65,7 +84,7 @@ export const FAMILIES:Record<BuildKind,{id:Family;name:string;description:string
  castle:[{id:'courtyard-castle',name:'Courtyard castle',description:'Ranges set round a central court, entered through a gatehouse.'},{id:'keep-bailey',name:'Keep & bailey',description:'A dominant keep, domestic buildings and a defended yard.'},{id:'tower-cluster',name:'Clustered towers',description:'Unequal towers connected by residential ranges.'},{id:'palace',name:'Courtyard palace',description:'A grand hall, apartments and a chapel around a court.'},{id:'double-ward',name:'Inner & outer wards',description:'Two linked compounds with separate gatehouses.'}],
  house:[{id:'hall-house',name:'Hall house',description:'A hearth hall, service end and private chambers.'},{id:'merchant-house',name:'Merchant house',description:'A workshop beneath private rooms and a jettied upper storey.'},{id:'annex-house',name:'Expanded house',description:'An older house extended with workshops and smaller annexes.'}]
 };
-export const DEFAULT_SETTINGS:Settings={kind:'manor',family:'crosswing',size:128,floors:3,organic:65,courtyard:false,chapel:true,garden:true,cellar:true,seed:'HALL-CROSSWING'};
+export const DEFAULT_SETTINGS:Settings={kind:'manor',family:'crosswing',size:128,floors:3,organic:65,courtyard:false,chapel:true,garden:true,cellar:true,essentials:true,seed:'HALL-CROSSWING'};
 export const ROOM_COLORS:Record<RoomKind,string>={hall:'#e9d8b4',bedroom:'#d9e1d0',service:'#e6cbb4',sacred:'#ded2e7',storage:'#dcd6c5',study:'#cadfdd',circulation:'#ede6d5',stairs:'#cbd1be',gallery:'#e2d8c4',court:'#dfd9c2'};
 export const ROOM_GROUPS:Record<RoomKind,string>={hall:'Gathering',bedroom:'Private chambers',service:'Service',sacred:'Chapel',storage:'Storage',study:'Study',circulation:'Circulation',stairs:'Stairway',gallery:'Open gallery',court:'Open court'};
 export const MATERIALS=[{id:0,name:'Air',color:'#ffffff'},{id:1,name:'Masonry',color:'#969a8d'},{id:2,name:'Timber',color:'#987348'},{id:3,name:'Slate roof',color:'#485c62'},{id:4,name:'Glass',color:'#aacace'},{id:5,name:'Plaster',color:'#e4d7b9'},{id:6,name:'Paving',color:'#bbad8e'},{id:7,name:'Garden',color:'#789263'},{id:8,name:'Hearth',color:'#65544a'},{id:9,name:'Furnishings',color:'#b89c69'}];

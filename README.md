@@ -39,7 +39,8 @@ access grammar rather than whichever walls happen to touch:
 - No room a household would not cross carries another room's only route. The test is whether closing a
   room strands another one, so a bedchamber with a door to its own wardrobe is correctly not a defect.
 - A chapel is sited off the great chamber or the hall, keeps its own antechapel, and is entered only from
-  circulation. Service reaches the hall through the screens passage, not through the hall body.
+  circulation — and the audit now checks the whole *route* to it, not only its own doors, because a forced
+  connection elsewhere in the plan can quietly put a lodging hall on the way to the chapel. Service reaches the hall through the screens passage, not through the hall body.
 - Loop closure adds passage-to-passage doors where the walk is longest, so a plan is never a bare tree
   with exactly one route to everywhere.
 
@@ -245,6 +246,109 @@ composition tried:
 - A **hall** keeps its long axis, its dais at the high end, its screens at the serving end, and its service
   doors out of the private half.
 - A **yard** is a way through, not a dead end with a gate on it.
+
+## Rooms a player needs, and rooms a house should have had
+
+Two gaps, one on each side of the same list.
+
+**A house should have had a library.** A great house has a library, a reading room, a still room, a map room,
+an infirmary; this one had a music room and a nursery and stopped. Four new trade groups fill that in — a
+library group, a still-room group, a physician's group, and more of the tower's clerical rooms — and they are
+ordinary groups, present whatever else is asked for. About half the estates now hold a library or a reading
+room without being asked.
+
+**A build needs somewhere to enchant.** Tick **Rooms a player needs** and the estate also programmes what you
+will have to do in it rather than only what the household did: an enchanting room and its library, a brewing
+room with its ingredient and potion stores, a smelting house with ore and fuel stores and an anvil floor, a
+storage hall with its sorting room and crates, and a trading hall. These are held apart from the trades
+because they answer a different question, and they are only built when the estate is asked for them.
+
+Everything else about them is ordinary, which is the point. They take their place in the programme, get their
+proportions from their kind, are furnished with the fixture they exist for, take their own door onto
+circulation, and are held to the same audit as any other room. They are spliced in behind the first trade
+rather than after the last, so a house with one service range still has somewhere to brew and a small manor
+still has somewhere to enchant. Across a 72-plan sample: an enchanting room in 51, a brewing room in 53, a
+trading hall in 48, a smelting house in 37.
+
+**Four new fixtures** come with them, because a room named for what happens in it should have the thing that
+happens in it: a **lectern** to read or enchant at, a **still** to brew over, a **forge** to smelt and beat
+at, and **crates** that are why a store is a store. Each has real dimensions and a clear side to use it from,
+like every other fitting. A room is named for its function, so the name is what says which fixture it wants —
+the same way the screens passage is known by its name.
+
+While fitting them, furniture stopped being one material. A hearth, an oven, a forge and a still are masonry;
+a well and a dais are stone; everything else is timber. The whole-building Litematica export was building the
+household's fires out of oak log.
+
+## What a range does when it runs out of programme
+
+Past the end of its programme a long range repeated whatever came second, so an estate could hold a Bakehouse,
+a Bakehouse 2 and a Bakehouse 3. That is not a household with three bakehouses; it is a programme that has run
+out of things to call a room, and the numeral on it says so.
+
+A range now repeats only what a household really has more than one of. Stores and lodging chambers come
+first, then anything else the programme lists, and a workroom is taken only if the range has not had one yet.
+The principal room is never repeated at all. Across a 108-plan sample no workroom anywhere carries a numeral:
+no *Bakehouse 3*, no *Scullery 3*, no *Laundry 2*, no *Great chamber 4*. Stores and chambers still come in
+runs, because a service court does hold several larders and a lodging range does hold several chambers.
+
+Then a range longer than one trade takes **the next trade**. The variants of a kind are groups — a kitchen
+group, a brewhouse group, a laundry group — and a range that runs past the end of one continues into the
+next, starting at its own. A very long service range holds the kitchen group, then the brewhouse group, then
+the laundry: which is what a service court is. That is §7.4's second repair, *select another variant*, reached
+long before its last, *reject the composition*. Numbered rooms fell from 10% of all rooms to **4%**, and the
+ones left are stores and lodging chambers, which is what a household has several of.
+
+**The rest of §7.4's order is not implemented, and the generator does not pretend otherwise.** Of its six
+steps it now has the first — a remainder too short to be a room goes to the room before it — the second, and
+the last. Steps three to five (add a genuinely required support function, shorten the wing or turn the residue
+into exterior space, move accommodation to another level) are not there.
+
+I tried capping how many rooms a rank may hold and giving the remainder to the last room, which is step one
+applied harder. With the middle of the order missing, step six then fired for every candidate and generation
+failed outright: `Pantry 3 has swallowed 884 blocks of its range`. A naming blemish had become a broken
+generator, and the cap came back out. A range longer than everything its kind knows how to be still has to be
+divided into something, and repeating a store is the least bad answer left.
+
+## A fitting is a fitting
+
+A great hall was furnished with one dining table sixty-one blocks long, and a bench sixty-one blocks long
+either side of it, because the board was drawn to the room instead of the room being filled with boards. A
+solar got a single shelf twenty-one blocks long. §7.3 asks for the opposite: a fitting has real dimensions,
+and a larger room gets more of them or a different arrangement of them, never a bigger one.
+
+`FITTINGS` in `lib/model.ts` is the one place that says how big each thing is and how much room you need
+beside it to use it — the side you stand on to sleep in it, sit at it or work at it. The audit holds every
+piece of furniture to both: a fitting past its dimensions is rejected, and so is one with no clear side.
+
+| | before | after |
+|---|---|---|
+| longest dining table | 61 × 2 | **8 × 2** |
+| longest bench | 61 × 1 | **8 × 1** |
+| longest shelf | 21 × 1 | **4 × 1** |
+| boards in a 3,000-block hall | 2 | **11** |
+
+The hall's dining is now a repeated trestle — a board, a bench either side, and room to get round the ends —
+laid down the hall as many times as the hall is long. A wall gets a row of shelves with a gap to reach
+between them. The altar is an altar rather than a shelf the width of the chapel.
+
+Chasing that turned up something worse. **No hall had ever had a high table, and four in five had no dais.**
+Three separate things were refusing them, each reasonable on its own:
+
+- the dais was tested against its own route-survival check as though it were an obstacle, and a platform
+  across the high end closes every route by definition;
+- the high table was placed on the dais and rejected for intersecting it;
+- the corners of the high end are cut back, and a platform the width of the hall puts its own corners
+  exactly where the cant took the floor away.
+
+A dais is not an obstacle: it is the floor of the high end, one step up in the reading and level with it in
+the walking, so it is laid in the floor course rather than on top of it and nothing has to climb it to reach
+the private door. Things stand on it. It is narrowed until it fits the cant rather than dropped. And the high
+table goes on the centre line where the centre line is free and slides along the dais where it is not.
+
+Every hall now has a dais, and a high table standing on it. §6.1's *typical failure to reject* for the hall
+motif is "a square leftover box with stretched tables and no focal end", and until now that was two out of
+three.
 
 ## Motifs, and what makes a hall a hall
 
