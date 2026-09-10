@@ -15,6 +15,8 @@ export class SparseBlocks {
   constructor(bounds:Plan['bounds']) {this.bounds=bounds;}
   get(x:number,y:number,z:number){const cx=Math.floor(x/16),cy=Math.floor(y/16),cz=Math.floor(z/16);return this.chunks.get(key(cx,cy,cz))?.[index(x-cx*16,y-cy*16,z-cz*16)]||0;}
   material(x:number,y:number,z:number){return this.get(x,y,z)&15;}
+  /** What the cell is for, as distinct from what it is made of: a glass pane and a window are both glass. */
+  kindAt(x:number,y:number,z:number):BlockKind{const v=this.get(x,y,z);return v?KINDS[(v>>4)&15]:'air';}
   apply(b:BlockBox){
     const value=b.material?((b.kind==='roof'?((b.ownerFloor??Math.floor(b.y/6))+8)<<8:0)|(KINDS.indexOf(b.kind)<<4)|b.material):0;
     for(let cy=Math.floor(b.y/16);cy<=Math.floor((b.y+b.h-1)/16);cy++)for(let cz=Math.floor(b.z/16);cz<=Math.floor((b.z+b.d-1)/16);cz++)for(let cx=Math.floor(b.x/16);cx<=Math.floor((b.x+b.w-1)/16);cx++){

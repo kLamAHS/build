@@ -852,3 +852,37 @@ void test('a covered walk is open to the yard it serves',()=>{
   assert.ok(loggias>=plans*.4,`only ${loggias} covered walks across ${plans} estates`);
   assert.ok(withOne>=plans*.3,`only ${withOne} of ${plans} estates have one at all`);
 });
+
+void test('a range set alongside another leaves a forecourt, not a slot',()=>{
+  // The defect this answers: every addition either squared up to its host or stood across a yard from it,
+  // so the only outdoor room the composition could make was one enclosed between two facing walls.
+  let plans=0,withOne=0,courts=0;
+  const sideOf=(yard:Rect,c:Rect)=>c.x+c.w===yard.x?'w':yard.x+yard.w===c.x?'e':c.z+c.d===yard.z?'n':yard.z+yard.d===c.z?'s':undefined;
+  for(const kind of ['manor','castle','house'] as const)for(const family of FAMILIES[kind])for(const seed of ['FORE-0','FORE-1','FORE-2']){
+    const p=generatePlan({...DEFAULT_SETTINGS,kind,family:family.id,size:288,floors:3,seed});
+    const tag=`${family.id}/${seed}`;
+    plans++;
+    const fore=p.components.filter(c=>c.kind==='court'&&c.name.includes('forecourt'));
+    if(fore.length)withOne++;
+    for(const yard of fore){
+      courts++;
+      assert.ok(Math.min(yard.bounds.w,yard.bounds.d)>=12,`${tag}: ${yard.name} is ${yard.bounds.w} by ${yard.bounds.d}`);
+      // What makes it a forecourt is the L: two masses on sides that meet, not two facing each other.
+      const touching=p.components.filter(c=>{
+        if(c.kind==='court')return false;
+        const a=yard.bounds,b=c.bounds;
+        const lapZ=Math.min(a.z+a.d,b.z+b.d)-Math.max(a.z,b.z),lapX=Math.min(a.x+a.w,b.x+b.w)-Math.max(a.x,b.x);
+        return (lapZ>0&&(a.x+a.w===b.x||b.x+b.w===a.x))||(lapX>0&&(a.z+a.d===b.z||b.z+b.d===a.z));
+      }).map(c=>sideOf(yard.bounds,c.bounds)).filter(Boolean) as string[];
+      assert.ok(touching.length>=2,`${tag}: ${yard.name} is addressed by ${touching.length} buildings`);
+      const across=new Set(touching.map(s=>s==='n'||s==='s'?'z':'x'));
+      assert.equal(across.size,2,`${tag}: ${yard.name} is closed on ${[...new Set(touching)].join(' and ')}, which is a yard and not a forecourt`);
+      // It is a way through like any other open space the composition holds.
+      const room=p.rooms.find(r=>r.componentId===yard.id)!;
+      assert.ok(p.connections.filter(e=>e.includes(room.id)).length>=2,`${tag}: ${yard.name} is a dead end`);
+    }
+    assert.deepEqual(auditArchitecture(p),[],`${tag}: the plan does not pass its own audit`);
+  }
+  assert.ok(withOne>=plans*.3,`only ${withOne} of ${plans} estates step a range past another`);
+  assert.ok(courts>=withOne,`${courts} forecourts across ${withOne} estates`);
+});
