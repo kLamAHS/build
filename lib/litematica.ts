@@ -1,6 +1,7 @@
 import { voxelize, type SparseBlocks } from './voxels.ts';
-import { dress, type BlockState } from './dressing.ts';
 import { type Floor, type Plan } from './model.ts';
+import { BASE_BLOCKS, parseBlockState } from './block-states.ts';
+import { buildDetailedModel, DETAIL_VERSION } from './architectural-detail.ts';
 
 /**
  * Litematica schematics, so a plan can be pasted into the world and built against.
@@ -12,6 +13,8 @@ import { type Floor, type Plan } from './model.ts';
  * their positions, this writer has neither, and every Litematica since Minecraft 1.13 reads 5 where the older
  * ones refuse 6. The data version is likewise deliberately behind — Minecraft upgrades a schematic that is
  * older than the client and refuses one that is newer, so being behind is the safe direction to be wrong in.
+ * Every state the architectural compiler can write exists in Java 1.16.5, which is what that data version
+ * claims: a block name the client does not know is pasted as air, and an export you cannot paste is not one.
  */
 const SCHEMATIC_VERSION=5,MINECRAFT_DATA_VERSION=2586;
 
@@ -40,7 +43,7 @@ class Writer {
   u8(v:number){this.room(1);this.buffer[this.at++]=v&0xff;}
   i16(v:number){this.room(2);this.buffer[this.at++]=(v>>8)&0xff;this.buffer[this.at++]=v&0xff;}
   i32(v:number){this.room(4);for(let shift=24;shift>=0;shift-=8)this.buffer[this.at++]=(v>>>shift)&0xff;}
-  text(v:string){const bytes=new TextEncoder().encode(v);this.i16(bytes.length);this.room(bytes.length);this.buffer.set(bytes,this.at);this.at+=bytes.length;}
+  text(v:string){const bytes=new TextEncoder().encode(v);if(bytes.length>65535)throw new Error('An NBT string exceeds 65,535 bytes.');this.i16(bytes.length);this.room(bytes.length);this.buffer.set(bytes,this.at);this.at+=bytes.length;}
   bytes(){return this.buffer.slice(0,this.at);}
 }
 
@@ -61,8 +64,12 @@ function payload(w:Writer,tag:Nbt):void {
   }
 }
 
-/** One region of blocks: a palette, and an index into it for every cell of a box. */
-export type Schematic={name:string;description:string;size:{x:number;y:number;z:number};palette:BlockState[];cells:Uint16Array};
+/**
+ * One region of blocks: a palette of canonical block states, and an index into it for every cell of a box.
+ * A state is written the way the compiler and the mesher already hold it — `minecraft:oak_stairs[facing=north,…]`
+ * — and split back into Name and Properties on the way out, so one string is the whole truth about a cell.
+ */
+export type Schematic={name:string;description:string;size:{x:number;y:number;z:number};palette:string[];cells:Uint16Array;origin?:{x:number;y:number;z:number}};
 export const cellIndex=(size:Schematic['size'],x:number,y:number,z:number)=>(y*size.z+z)*size.x+x;
 
 /**
@@ -70,11 +77,13 @@ export const cellIndex=(size:Schematic['size'],x:number,y:number,z:number)=>(y*s
  * one long and the next. This is not the packing modern Minecraft chunks use, which pads instead.
  */
 export function packBlockStates(cells:Uint16Array,bits:number){
+  if(!Number.isInteger(bits)||bits<2||bits>16)throw new Error('Block states require 2–16 bits per cell.');
   const longs=Math.max(1,Math.ceil(cells.length*bits/64));
   const words=new Uint32Array(longs*2);
   for(let i=0;i<cells.length;i++){
     const value=cells[i];
     if(!value)continue;
+    if(value>=2**bits)throw new Error('A block state does not fit its palette.');
     const start=i*bits;
     for(let k=0;k<bits;k++){
       if(!((value>>>k)&1))continue;
@@ -87,9 +96,16 @@ export function packBlockStates(cells:Uint16Array,bits:number){
 
 export function nbtBytes(schematic:Schematic,when=Date.now()){
   const {size,palette,cells}=schematic;
+  // A schematic that disagrees with itself pastes as rubble rather than failing, so it fails here instead.
+  if(!Object.values(size).every(n=>Number.isInteger(n)&&n>0)||size.x*size.y*size.z!==cells.length)throw new Error('Schematic dimensions do not match its cells.');
+  if(palette[0]!=='minecraft:air'||palette.length>65536||new Set(palette).size!==palette.length)throw new Error('Invalid schematic palette.');
   const bits=Math.max(2,Math.ceil(Math.log2(Math.max(2,palette.length))));
   let filled=0;
-  for(const cell of cells)if(cell)filled++;
+  for(const cell of cells){if(cell>=palette.length)throw new Error('A schematic cell references a missing state.');if(cell)filled++;}
+  const stateTags=palette.map(key=>{
+    const {name,properties}=parseBlockState(key);
+    return compound({Name:str(name),...(Object.keys(properties).length?{Properties:compound(Object.fromEntries(Object.entries(properties).map(([k,v])=>[k,str(v)])))}:{})});
+  });
   const root=compound({
     MinecraftDataVersion:int(MINECRAFT_DATA_VERSION),
     Version:int(SCHEMATIC_VERSION),
@@ -108,9 +124,7 @@ export function nbtBytes(schematic:Schematic,when=Date.now()){
       [schematic.name]:compound({
         Position:xyz(0,0,0),
         Size:xyz(size.x,size.y,size.z),
-        BlockStatePalette:{t:'list',of:TAG.compound,v:palette.map(block=>compound(block.props
-          ?{Name:str(block.name),Properties:compound(Object.fromEntries(Object.entries(block.props).map(([k,v])=>[k,str(v)])))}
-          :{Name:str(block.name)}))},
+        BlockStatePalette:{t:'list',of:TAG.compound,v:stateTags},
         BlockStates:{t:'longArray',words:packBlockStates(cells,bits)},
         Entities:{t:'list',of:TAG.compound,v:[]},
         TileEntities:{t:'list',of:TAG.compound,v:[]},
@@ -131,16 +145,9 @@ export async function litematicaFile(schematic:Schematic,when=Date.now()):Promis
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
-/**
- * What to build each material out of. Vanilla blocks, and old enough that any client since 1.13 knows them,
- * because a schematic that will not paste is not an export.
- */
-export const BLOCKS:Record<number,string>={
-  1:'minecraft:stone_bricks',2:'minecraft:oak_planks',3:'minecraft:gray_terracotta',4:'minecraft:glass',
-  5:'minecraft:white_terracotta',6:'minecraft:cobblestone',7:'minecraft:grass_block',8:'minecraft:bricks',
-  9:'minecraft:oak_log',
-};
-export const OUTLINE_BLOCKS:BlockState[]=[{name:'minecraft:air'},{name:'minecraft:stone_bricks'},{name:'minecraft:glass'},{name:'minecraft:oak_planks'}];
+/** What a bare material is built out of, for cells the architectural compiler left undressed. */
+export const BLOCKS=BASE_BLOCKS;
+export const OUTLINE_BLOCKS=['minecraft:air','minecraft:stone_bricks','minecraft:glass','minecraft:oak_planks'];
 
 /**
  * One floor's walls as a single course, to lay out on the ground and build up from. It is read at head
@@ -148,7 +155,8 @@ export const OUTLINE_BLOCKS:BlockState[]=[{name:'minecraft:air'},{name:'minecraf
  * in: an outline taken at the floor would be a continuous ring telling you nothing about the way in.
  *
  * Three blocks, so the course reads without a legend: stone brick where the wall stands, glass where a light
- * goes, and planks across each threshold — a doorway you can walk through and still see the line of.
+ * goes, and planks across each threshold — a doorway you can walk through and still see the line of. This is
+ * the structural grid, not the dressed one: an outline to build against wants the mass, not the masonry.
  */
 export function floorOutline(plan:Plan,floor:Floor,grid:SparseBlocks=voxelize(plan)):Schematic {
   const b=plan.bounds,size={x:b.w,y:1,z:b.d},at=floor.elevation+2;
@@ -170,13 +178,22 @@ export function floorOutline(plan:Plan,floor:Floor,grid:SparseBlocks=voxelize(pl
 }
 
 /**
- * The whole estate, every block of it, dressed — which is what makes it worth pasting rather than tracing.
- * The massing comes from the plan and the material from `lib/dressing.ts`; see there for why a wall is nine
- * stones rather than one and why a fifth of what is placed is stairs and slabs.
+ * The whole estate, every block of it, exactly as the 3D view shows it — which is what makes it worth
+ * pasting rather than tracing. The massing comes from the plan and the architecture from
+ * `lib/architectural-detail.ts`: one model, meshed for the viewer and written out here, so what you paste
+ * is what you looked at. Passing a raw grid instead exports the structure undressed.
  */
-export function wholeBuilding(plan:Plan,grid:SparseBlocks=voxelize(plan)):Schematic {
-  const {size,palette,cells,lights}=dress(plan,grid);
+export function wholeBuilding(plan:Plan,grid:SparseBlocks=buildDetailedModel(plan).grid):Schematic {
+  const {bounds:b,minY:low,maxY:high}=grid.extent(plan.minY,plan.maxY),size={x:b.w,y:high-low+1,z:b.d};
+  const volume=size.x*size.y*size.z;
+  if(!Number.isSafeInteger(volume)||volume>64*1024*1024)throw new Error('This schematic exceeds 64 million cells. Reduce the footprint or storeys before exporting.');
+  const blockAt=(x:number,y:number,z:number,value:number)=>grid.stateAt(x,y,z)?.key??BLOCKS[value&15]??'minecraft:stone';
+  const used=new Set<string>();grid.forEach((x,y,z,value)=>used.add(blockAt(x,y,z,value)));
+  const palette=['minecraft:air',...[...used].sort()];
+  if(palette.length>65536)throw new Error('Too many block states for a schematic.');
+  const slot=new Map(palette.map((state,i)=>[state,i])),cells=new Uint16Array(volume);
+  grid.forEach((x,y,z,value)=>{cells[cellIndex(size,x-b.x,y-low,z-b.z)]=slot.get(blockAt(x,y,z,value))!;});
   return {name:plan.name.replace(/[^\w -]/g,''),
-    description:`${plan.name}, every block. ${plan.settings.kind} · ${plan.family} · seed ${plan.settings.seed}. Y ${plan.minY} is the lowest course. ${lights} lights.`,
-    size,palette,cells};
+    description:`${plan.name}, every block. ${plan.settings.kind} · ${plan.family} · seed ${plan.settings.seed}. Architecture ${DETAIL_VERSION}. Origin X ${b.x}, Y ${low}, Z ${b.z}.`,
+    size,palette,cells,origin:{x:b.x,y:low,z:b.z}};
 }

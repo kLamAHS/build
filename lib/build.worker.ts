@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import { tryGenerate } from './architecture.ts';
-import { voxelize, prepareMeshes, type SparseBlocks } from './voxels.ts';
+import { prepareMeshes, type SparseBlocks } from './voxels.ts';
+import { buildDetailedModel } from './architectural-detail.ts';
 import type { Settings } from './model.ts';
 
 let grid:SparseBlocks|undefined;
@@ -12,11 +13,14 @@ self.onmessage=(event:MessageEvent<{type:'generate'|'layer';id:number;settings?:
       currentId=message.id;
       const start=performance.now(),result=tryGenerate(message.settings!,message.only);
       if(!result.ok){self.postMessage({type:'error',id:message.id,error:result.error});return;}
-      self.postMessage({type:'progress',id:message.id,stage:'Preparing block geometry…'});
-      grid=voxelize(result.plan);
+      self.postMessage({type:'progress',id:message.id,stage:'Crafting roofs, masonry and architectural details…'});
+      const model=buildDetailedModel(result.plan);grid=model.grid;
+      // The roofs the compiler builds stand above the plan's own ceiling, so the viewer is told how tall it got.
+      const plan={...result.plan,minY:model.minY,maxY:model.maxY};
       const meshes=prepareMeshes(grid),stats={...grid.stats(),milliseconds:Math.round(performance.now()-start),triangles:meshes.reduce((n,m)=>n+m.indices.length/3,0)};
-      const floorLayers=Object.fromEntries(result.plan.floors.map(f=>[f.elevation,grid!.layer(f.elevation+2)]));
-      self.postMessage({type:'ready',id:message.id,plan:result.plan,alternatives:result.alternatives,meshes,stats,floorLayers}, {transfer:meshes.flatMap(m=>[m.positions.buffer,m.normals.buffer,m.indices.buffer])});
+      // Floor drawings stay structural. The block-layer view uses the final, exportable architectural model.
+      const floorLayers=Object.fromEntries(plan.floors.map(f=>[f.elevation,model.structure.layer(f.elevation+2)]));
+      self.postMessage({type:'ready',id:message.id,plan,alternatives:result.alternatives,meshes,stats,floorLayers}, {transfer:meshes.flatMap(m=>[m.positions.buffer,m.normals.buffer,m.indices.buffer])});
     }else if(grid&&message.id===currentId){
       self.postMessage({type:'layer',id:message.id,requestId:message.requestId,layer:grid.layer(message.y!),previous:grid.layer(message.y!-1)});
     }
