@@ -786,14 +786,24 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
       [['Store loft','storage'],['Journeyman’s room','bedroom'],['Sail loft','storage'],['Rope store','storage']],
     ],
   };
+  /**
+   * A range longer than one trade takes the next trade rather than a second of what it already has. The
+   * variants are groups — a kitchen group, a brewhouse group, a laundry group — so a range that runs past
+   * the end of one continues into the next, starting at its own. That is §7.4's second repair, choosing
+   * another variant, reached long before its last, which is to throw the composition away.
+   */
+  const trades=(list:[string,RoomKind][][],at:number)=>{
+    const start=((at%list.length)+list.length)%list.length;
+    return [...list.slice(start),...list.slice(0,start)].flat();
+  };
   function programFor(c:BuildingComponent,f:number):[string,RoomKind][]{
     if(f<0)return [['Wine cellar','storage'],['Root store','storage'],['Strong room','storage'],['Buttery store','storage'],['Ice store','storage']];
     const rank=rankInKind.get(c.id)??0,variants=VARIANTS[c.kind];
-    if(f===0&&variants)return variants[rank%variants.length];
+    if(f===0&&variants)return trades(variants,rank);
     if(c.kind==='tower'&&f>0)return [[f===c.storeys-1?'Tower chamber':'Solar chamber','bedroom'],['Antechamber','study'],['Wardrobe','storage'],['Guest chamber','bedroom'],['Linen room','storage']];
     if(f===c.storeys-1&&f>1)return [['Gabled bedchamber','bedroom'],['Wardrobe & study','study'],['Bedchamber','bedroom'],['Linen room','storage'],['Private study','study']];
     const above=UPPER[c.kind];
-    if(above)return above[(rank+f-1)%above.length];
+    if(above)return trades(above,rank+f-1);
     return [['Bedchamber','bedroom'],['Guest chamber','bedroom'],['Linen room','storage'],['Nurse’s chamber','bedroom'],['Wardrobe','storage']];
   }
   for(const c of components)if(c.storeys>1&&c.kind!=='hall'&&c.kind!=='court'&&!canStair(c)){c.storeys=1;c.topY=6;}
@@ -935,7 +945,8 @@ export function generateCandidate(settings:Settings,attempt=0):Plan {
           if(slot.principal)chamber=made;
         }
         if(notch&&chamber){
-          const [name,kind]=[...program].reverse().find(([,k])=>k==='storage')??program[program.length-1];
+          // The closet is named for this chamber's own store, which is the first the programme lists.
+          const [name,kind]=program.find(([,k])=>k==='storage')??program[program.length-1];
           const seen=(used.get(name)??0)+1;
           suiteOf(chamber,room(c,seen>1?`${name} ${seen}`:name,kind,notch,y,ceiling));
         }

@@ -258,17 +258,23 @@ The principal room is never repeated at all. Across a 108-plan sample no workroo
 no *Bakehouse 3*, no *Scullery 3*, no *Laundry 2*, no *Great chamber 4*. Stores and chambers still come in
 runs, because a service court does hold several larders and a lodging range does hold several chambers.
 
-**§7.4's repair order is only half implemented, and deliberately so.** Of the six steps it asks for, the
-generator has the first — a remainder too short to be a room is given to the room before it — and the last —
-reject the composition and try another. The four in between (select another suite or motif variant, add a
-genuinely required support function, shorten the wing or turn the residue into exterior space, move
-accommodation to another level) are not there.
+Then a range longer than one trade takes **the next trade**. The variants of a kind are groups — a kitchen
+group, a brewhouse group, a laundry group — and a range that runs past the end of one continues into the
+next, starting at its own. A very long service range holds the kitchen group, then the brewhouse group, then
+the laundry: which is what a service court is. That is §7.4's second repair, *select another variant*, reached
+long before its last, *reject the composition*. Numbered rooms fell from 10% of all rooms to **4%**, and the
+ones left are stores and lodging chambers, which is what a household has several of.
+
+**The rest of §7.4's order is not implemented, and the generator does not pretend otherwise.** Of its six
+steps it now has the first — a remainder too short to be a room goes to the room before it — the second, and
+the last. Steps three to five (add a genuinely required support function, shorten the wing or turn the residue
+into exterior space, move accommodation to another level) are not there.
 
 I tried capping how many rooms a rank may hold and giving the remainder to the last room, which is step one
-applied harder. With steps two to five missing, step six then fired for every candidate and generation failed
-outright: `Pantry 3 has swallowed 884 blocks of its range`. A naming blemish had become a broken generator.
-The cap came back out. The honest position is that a range longer than its programme has to be divided into
-something, and repeating a store is the least bad answer available until the middle of that order exists.
+applied harder. With the middle of the order missing, step six then fired for every candidate and generation
+failed outright: `Pantry 3 has swallowed 884 blocks of its range`. A naming blemish had become a broken
+generator, and the cap came back out. A range longer than everything its kind knows how to be still has to be
+divided into something, and repeating a store is the least bad answer left.
 
 ## A fitting is a fitting
 

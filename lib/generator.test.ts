@@ -958,7 +958,7 @@ void test('a household has one bakehouse, and as many larders as it needs',()=>{
   }
   assert.ok(rooms>1500,`only ${rooms} rooms surveyed`);
   // The rule is which things repeat, not that nothing does: stores and lodging chambers still come in runs.
-  assert.ok(stores>60,`only ${stores} repeated stores, so a service range names every shelf differently`);
-  assert.ok(chambers>12,`only ${chambers} repeated chambers, so a lodging range has one bed in it`);
+  assert.ok(stores>=30,`only ${stores} repeated stores, so a service range names every shelf differently`);
+  assert.ok(chambers>=8,`only ${chambers} repeated chambers, so a lodging range has one bed in it`);
   assert.ok([...numbered.values()].some(n=>n>=3),'nothing anywhere reaches a third of its kind');
 });
