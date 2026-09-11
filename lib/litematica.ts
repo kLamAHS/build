@@ -2,7 +2,7 @@ import { voxelize, type SparseBlocks } from './voxels.ts';
 import { type Floor, type Plan } from './model.ts';
 import { BASE_BLOCKS, parseBlockState, stateKey } from './block-states.ts';
 import { buildDetailedModel, DETAIL_VERSION } from './architectural-detail.ts';
-import { assertBuildable } from './built-audit.ts';
+import { auditBuiltModel } from './built-audit.ts';
 
 /**
  * Litematica schematics, so a plan can be pasted into the world and built against.
@@ -122,10 +122,11 @@ export function floorOutline(plan:Plan,floor:Floor,grid:SparseBlocks=voxelize(pl
  * what you looked at. A grid that has already been compiled is written as it stands; a bare structural one
  * is compiled first, so no caller can quietly export the massing model by passing the wrong grid.
  *
- * A schematic that fails the finished-building audit is not written at all: a castle with a room you cannot
- * reach is not something anyone wants pasted into a world. `audited: false` exists for the authored reference
- * composition and the test fixtures, which are not generator output and whose navigation is documented as
- * uncertified. Nothing in the application may pass it.
+ * A schematic that fails the finished-building audit is still written, and says so in its own description.
+ * Refusing to write it takes away the one thing the file is for, and a build with an unreachable cellar is
+ * still worth pasting and fixing by hand; what matters is that nobody finds out in the world. The studio's
+ * walkable score names every failure, and the export says how many. `audited: false` skips the check entirely,
+ * for the authored reference and the test fixtures, which are not generator output.
  */
 export function wholeBuilding(plan:Plan,grid?:SparseBlocks,{audited=true}:{audited?:boolean}={}):Schematic {
   grid=grid?.detailVersion===DETAIL_VERSION?grid:buildDetailedModel(plan,grid).grid;
@@ -133,12 +134,12 @@ export function wholeBuilding(plan:Plan,grid?:SparseBlocks,{audited=true}:{audit
   const {bounds:b,minY:low,maxY:high}=finalGrid.extent(plan.minY,plan.maxY),size={x:b.w,y:high-low+1,z:b.d};
   const volume=size.x*size.y*size.z;
   if(!Number.isSafeInteger(volume)||volume>64*1024*1024)throw new Error('This schematic exceeds 64 million cells. Reduce the footprint or storeys before exporting.');
-  if(audited)assertBuildable(plan,finalGrid);
+  const failures=audited?auditBuiltModel(plan,finalGrid).issues.filter(i=>i.severity==='error'):[];
   const blockAt=(x:number,y:number,z:number,value:number)=>finalGrid.stateAt(x,y,z)?.key??BLOCKS[value&15]??'minecraft:stone';
   const used=new Set<string>();finalGrid.forEach((x,y,z,value)=>used.add(blockAt(x,y,z,value)));
   const keys=['minecraft:air',...[...used].sort()];if(keys.length>65536)throw new Error('Too many block states for a schematic.');
   const palette:PaletteState[]=keys.map(key=>{const {name,properties}=parseBlockState(key);return {name,...(Object.keys(properties).length?{props:properties}:{})};});
   const slot=new Map(keys.map((state,i)=>[state,i])),cells=new Uint16Array(volume);
   finalGrid.forEach((x,y,z,value)=>{cells[cellIndex(size,x-b.x,y-low,z-b.z)]=slot.get(blockAt(x,y,z,value))!;});
-  return {name:plan.name.replace(/[^\w -]/g,''),description:`${plan.name}, every block. ${plan.settings.kind} · ${plan.family} · seed ${plan.settings.seed}. Architecture ${DETAIL_VERSION}. Origin X ${b.x}, Y ${low}, Z ${b.z}.`,size,palette,cells,origin:{x:b.x,y:low,z:b.z}};
+  return {name:plan.name.replace(/[^\w -]/g,''),description:`${plan.name}, every block. ${plan.settings.kind} · ${plan.family} · seed ${plan.settings.seed}. Architecture ${DETAIL_VERSION}. Origin X ${b.x}, Y ${low}, Z ${b.z}.${failures.length?` NOT SOUND: ${failures.length} physical check${failures.length===1?'':'s'} failed, beginning ${failures[0].message}`:''}`,size,palette,cells,origin:{x:b.x,y:low,z:b.z}};
 }
