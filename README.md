@@ -187,7 +187,7 @@ the stair well deserves to be told what it is.
 
 ## Building it in the world
 
-Two of the export options write `.litematic` files, which Litematica reads straight off disk: put them in
+Three of the export options write `.litematic` files, which Litematica reads straight off disk: put them in
 `.minecraft/schematics`, or your instance's own schematics folder, and load one from Litematica's menu.
 
 **Floor outline** is the one to build from. It is a single course, one block high, read at head height rather
@@ -203,13 +203,22 @@ so it reads without a legend:
 
 Lay it out, and build up from it. A 512-block estate's outline is about 3 kB.
 
+**Outline markers** is the same wall lines as a hologram to stand inside, at whatever size you want to see
+them: one floor or every floor at once, each at its own elevation with the cellar below the datum, one to
+four blocks across for every plan block, and one to five blocks high. Walls, posts, chimneys and window
+lines become a single marker block — wool, stone, cobble or planks, or a different wool for each floor —
+with the stairs in gold if you ask for them. Roofs, floors and furniture stay out of it. The dialog counts
+the markers and measures the schematic before it writes anything, and `/litematica` does the same for a
+`Complete building · JSON` you saved earlier, entirely inside the tab. `docs/litematica.md` has the detail.
+
 **Complete building** is every block of every floor as the 3D view shows it — see *Building it, not blocking
 it out* below. About 260 kB for the largest estate the generator makes, and a second to prepare. The 3D view
 also has its own **Export 3D · GLB** button, which writes the same model as mesh geometry for anything that
 reads glTF: the complete building, not the cutaway you happen to be looking at.
 
-Both are gzipped NBT written by `lib/litematica.ts`, which writes the tags this one format needs and no
-others. Two deliberate choices are in there:
+All three are gzipped NBT written through `lib/nbt.ts`, which writes the tags this one format needs and no
+others — one writer, one bit packer and one gzip envelope, so there is only ever one answer to what version
+Keepwright writes. Three deliberate choices are in there:
 
 - **Schematic version 5, not the current 6.** They differ only in how entities and tile entities carry their
   positions; this writer has neither, and every Litematica since Minecraft 1.13 reads 5 where the older ones
@@ -217,6 +226,9 @@ others. Two deliberate choices are in there:
 - **A data version behind the client.** Minecraft upgrades a schematic older than the client and refuses one
   that is newer, so being behind is the safe direction to be wrong in, and every block in the palette has
   existed since 1.13.
+- **Java's modified UTF-8 for strings**, which is what reads NBT back: NUL is two bytes and an astral
+  character is two three-byte halves, where plain UTF-8 would put a four-byte sequence in front of a reader
+  that refuses one. A building named with an emoji still loads.
 
 The block states are packed the way Litematica packs them — entries of *n* bits end to end, straddling the
 boundary between one long and the next, which is not the padded packing modern Minecraft chunks use. The

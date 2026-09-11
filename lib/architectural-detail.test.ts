@@ -5,7 +5,8 @@ import { architectureFixture } from './test-fixtures/architecture.ts';
 import { buildDetailedModel } from './architectural-detail.ts';
 import { solid, slab, stair, wallPost, parseBlockState, stateKey } from './block-states.ts';
 import { SparseBlocks, voxelize, prepareMeshes, type MeshData } from './voxels.ts';
-import { wholeBuilding, floorOutline, cellIndex, litematicaFile, nbtBytes, packBlockStates, paletteKey } from './litematica.ts';
+import { wholeBuilding, floorOutline, cellIndex, litematicaFile, nbtBytes, paletteKey } from './litematica.ts';
+import { packBlockStates } from './nbt.ts';
 
 function one(x=0,y=0,z=0){const grid=new SparseBlocks({x:-20,z:-20,w:60,d:60});grid.apply({x,y,z,w:1,h:1,d:1,material:1,kind:'wall',componentId:'test'});return grid;}
 function surface(meshes:MeshData[]){let area=0;for(const m of meshes)for(let i=0;i<m.indices.length;i+=3){

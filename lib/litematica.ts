@@ -3,93 +3,36 @@ import { type Floor, type Plan } from './model.ts';
 import { BASE_BLOCKS, parseBlockState, stateKey } from './block-states.ts';
 import { buildDetailedModel, DETAIL_VERSION } from './architectural-detail.ts';
 import { auditBuiltModel } from './built-audit.ts';
+import { compound, gzip, int, list, millis, MINECRAFT_DATA_VERSION, nbtFile, packBlockStates, paletteBits, SCHEMATIC_VERSION, str, TAG, xyz } from './nbt.ts';
 
 /**
- * Litematica schematics, so a plan can be pasted into the world and built against.
- *
- * The file is gzipped big-endian NBT. Nothing here is generic: it writes the tags this one format needs and
- * no others, because a general NBT library would be more code than the format is.
- *
- * Schematic version 5 rather than the current 6: the two differ only in how entities and tile entities carry
- * their positions, this writer has neither, and every Litematica since Minecraft 1.13 reads 5 where the older
- * ones refuse 6. The data version is likewise deliberately behind — Minecraft upgrades a schematic that is
- * older than the client and refuses one that is newer, so being behind is the safe direction to be wrong in.
- * Every state the architectural compiler can write exists in Java 1.16.5, which is what that data version
- * claims: a block name the client does not know is pasted as air, and an export you cannot paste is not one.
+ * Litematica schematics, so a plan can be pasted into the world and built against. The NBT tags, the bit
+ * packing, the gzip envelope and the reason this writes schematic version 5 all live in `lib/nbt.ts`, shared
+ * with the outline exporter in `lib/litematica-outlines.ts`.
  */
-const SCHEMATIC_VERSION=5,MINECRAFT_DATA_VERSION=2586;
-const TAG={byte:1,short:2,int:3,long:4,string:8,list:9,compound:10,longArray:12} as const;
-type Nbt=
-  |{t:'byte';v:number}|{t:'short';v:number}|{t:'int';v:number}|{t:'long';hi:number;lo:number}
-  |{t:'string';v:string}|{t:'longArray';words:Uint32Array}|{t:'list';of:number;v:Nbt[]}|{t:'compound';v:Record<string,Nbt>};
-const int=(v:number):Nbt=>({t:'int',v});
-const str=(v:string):Nbt=>({t:'string',v});
-const compound=(v:Record<string,Nbt>):Nbt=>({t:'compound',v});
-const xyz=(x:number,y:number,z:number):Nbt=>compound({x:int(x),y:int(y),z:int(z)});
-const millis=(ms:number):Nbt=>({t:'long',hi:Math.floor(ms/4294967296),lo:ms>>>0});
-class Writer {
-  private buffer=new Uint8Array(4096);private at=0;
-  private room(n:number){if(this.at+n<=this.buffer.length)return;let size=this.buffer.length;while(size<this.at+n)size*=2;const next=new Uint8Array(size);next.set(this.buffer.subarray(0,this.at));this.buffer=next;}
-  u8(v:number){this.room(1);this.buffer[this.at++]=v&0xff;}
-  i16(v:number){this.room(2);this.buffer[this.at++]=(v>>8)&0xff;this.buffer[this.at++]=v&0xff;}
-  i32(v:number){this.room(4);for(let shift=24;shift>=0;shift-=8)this.buffer[this.at++]=(v>>>shift)&0xff;}
-  text(v:string){const bytes=new TextEncoder().encode(v);if(bytes.length>65535)throw new Error('An NBT string exceeds 65,535 bytes.');this.i16(bytes.length);this.room(bytes.length);this.buffer.set(bytes,this.at);this.at+=bytes.length;}
-  bytes(){return this.buffer.slice(0,this.at);}
-}
-function payload(w:Writer,tag:Nbt):void {
-  switch(tag.t){
-    case 'byte':w.u8(tag.v);break;case 'short':w.i16(tag.v);break;case 'int':w.i32(tag.v);break;
-    case 'long':w.i32(tag.hi);w.i32(tag.lo);break;case 'string':w.text(tag.v);break;
-    case 'longArray':w.i32(tag.words.length/2);for(const word of tag.words)w.i32(word|0);break;
-    case 'list':w.u8(tag.v.length?tag.of:0);w.i32(tag.v.length);for(const item of tag.v)payload(w,item);break;
-    case 'compound':for(const [name,value] of Object.entries(tag.v)){w.u8(TAG[value.t]);w.text(name);payload(w,value);}w.u8(0);break;
-  }
-}
+
 /** One entry of a region's palette: a block and the properties that make it this exact state. */
 export type PaletteState={name:string;props?:Record<string,string>};
 export const paletteKey=(block:PaletteState)=>stateKey(block.name,block.props??{});
 export type Schematic={name:string;description:string;size:{x:number;y:number;z:number};palette:PaletteState[];cells:Uint16Array;origin?:{x:number;y:number;z:number}};
 export const cellIndex=(size:Schematic['size'],x:number,y:number,z:number)=>(y*size.z+z)*size.x+x;
-/**
- * Litematica's own bit packing: entries of `bits` bits, packed end to end, straddling the boundary between
- * one long and the next. This is not the packing modern Minecraft chunks use, which pads instead. The longs
- * are held as pairs of 32-bit words, high then low, because packing millions of entries through BigInt costs
- * more than the rest of the export put together.
- */
-export function packBlockStates(cells:Uint16Array,bits:number){
-  if(!Number.isInteger(bits)||bits<2||bits>16)throw new Error('Block states require 2–16 bits per cell.');
-  const longs=Math.max(1,Math.ceil(cells.length*bits/64)),words=new Uint32Array(longs*2);
-  for(let i=0;i<cells.length;i++){
-    const value=cells[i];if(!value)continue;
-    if(value>=2**bits)throw new Error('A block state does not fit its palette.');
-    const start=i*bits;
-    for(let k=0;k<bits;k++){
-      if(!((value>>>k)&1))continue;const bit=start+k,long=bit>>6,offset=bit&63;
-      if(offset<32)words[long*2+1]|=1<<offset;else words[long*2]|=1<<(offset-32);
-    }
-  }
-  return words;
-}
 export function nbtBytes(schematic:Schematic,when=Date.now()){
   const {size,palette,cells}=schematic;
   if(!Object.values(size).every(n=>Number.isInteger(n)&&n>0)||size.x*size.y*size.z!==cells.length)throw new Error('Schematic dimensions do not match its cells.');
   if(palette[0]?.name!=='minecraft:air'||palette.length>65536||new Set(palette.map(paletteKey)).size!==palette.length)throw new Error('Invalid schematic palette.');
-  const bits=Math.max(2,Math.ceil(Math.log2(Math.max(2,palette.length))));let filled=0;
+  const bits=paletteBits(palette.length);let filled=0;
   for(const cell of cells){if(cell>=palette.length)throw new Error('A schematic cell references a missing state.');if(cell)filled++;}
   const stateTags=palette.map(block=>{const {name,properties}=parseBlockState(paletteKey(block));return compound({Name:str(name),...(Object.keys(properties).length?{Properties:compound(Object.fromEntries(Object.entries(properties).map(([k,v])=>[k,str(v)])))}:{})});});
   const root=compound({
     MinecraftDataVersion:int(MINECRAFT_DATA_VERSION),Version:int(SCHEMATIC_VERSION),
     Metadata:compound({Author:str('Keepwright'),Description:str(schematic.description),Name:str(schematic.name),EnclosingSize:xyz(size.x,size.y,size.z),RegionCount:int(1),TimeCreated:millis(when),TimeModified:millis(when),TotalBlocks:int(filled),TotalVolume:int(size.x*size.y*size.z)}),
     Regions:compound({[schematic.name]:compound({Position:xyz(0,0,0),Size:xyz(size.x,size.y,size.z),
-      BlockStatePalette:{t:'list',of:TAG.compound,v:stateTags},BlockStates:{t:'longArray',words:packBlockStates(cells,bits)},
-      Entities:{t:'list',of:TAG.compound,v:[]},TileEntities:{t:'list',of:TAG.compound,v:[]},PendingBlockTicks:{t:'list',of:TAG.compound,v:[]},PendingFluidTicks:{t:'list',of:TAG.compound,v:[]}})}),
+      BlockStatePalette:list(TAG.compound,stateTags),BlockStates:{t:'longArray',words:packBlockStates(cells,bits)},
+      Entities:list(TAG.compound,[]),TileEntities:list(TAG.compound,[]),PendingBlockTicks:list(TAG.compound,[]),PendingFluidTicks:list(TAG.compound,[])})}),
   });
-  const w=new Writer();w.u8(TAG.compound);w.text('');payload(w,root);return w.bytes();
+  return nbtFile(root);
 }
-export async function litematicaFile(schematic:Schematic,when=Date.now()):Promise<Uint8Array> {
-  const bytes=nbtBytes(schematic,when),stream=new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream('gzip'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
-}
+export const litematicaFile=async(schematic:Schematic,when=Date.now())=>gzip(nbtBytes(schematic,when));
 export const BLOCKS=BASE_BLOCKS;
 export const OUTLINE_BLOCKS:PaletteState[]=['minecraft:air','minecraft:stone_bricks','minecraft:glass','minecraft:oak_planks'].map(name=>({name}));
 /**
