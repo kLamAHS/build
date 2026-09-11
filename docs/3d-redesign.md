@@ -100,9 +100,11 @@ arrived rather than as they were fixed — so three things were taken from it an
 - `trapdoor()` is the package's: an open one hangs on the face opposite the one it faces, which is what the
   vanilla model does and the reverse of what the earlier version assumed, and a closed one defaults to the
   bottom of its cell, which is where a table top on fence legs belongs.
-- The whole-building export refuses to write a schematic that fails the finished-building audit. `audited:
-  false` exists only for the authored reference and the test fixtures, which are not generator output and
-  whose navigation their own documentation calls uncertified.
+- The whole-building export audits the finished building. The package refused to write a failing schematic;
+  that was tried and reversed, because it takes away the one thing the file is for — a build with an
+  unreachable cellar is still worth pasting and fixing by hand. The file is written and says so in its own
+  description, the studio names every failure in its walkable score, and the export notice repeats the count.
+  `audited: false` skips the check entirely, for the authored reference and the test fixtures.
 - Portals are reconciled once more after the interior finishes, so a beam or a carpet cannot have the last
   word over a declared doorway.
 

@@ -90,7 +90,9 @@ export default function Home(){
       else if(format==='all'){
         const pages=plan.floors.map((f,i)=>{const el=document.getElementById(`export-floor-${f.index}`)!.cloneNode(true) as SVGSVGElement;el.setAttribute('y',String(i*1100));el.setAttribute('width','1400');el.setAttribute('height','1100');return new XMLSerializer().serializeToString(el);}).join('');saveFile(new Blob([`<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="${1100*plan.floors.length}">${pages}</svg>`],{type:'image/svg+xml'}),`${slug}-all-floors.svg`);
       }else{const el=document.getElementById(`export-floor-${floor.index}`)!.cloneNode(true) as SVGSVGElement;el.removeAttribute('id');el.setAttribute('xmlns','http://www.w3.org/2000/svg');await saveSvg(new XMLSerializer().serializeToString(el),`${slug}-${floor.name.replaceAll(' ','-')}`,format==='png');}
-      setNotice('Your blueprint has been exported.');setDialog(null);
+      // A build that failed its own physical checks still exports — but nobody should find that out in the world.
+      const unsound=format==='litematic-all'&&audit&&!audit.valid?` It failed ${audit.issues.filter(i=>i.severity==='error').length} of the walkable checks — see the walkable score.`:'';
+      setNotice('Your blueprint has been exported.'+unsound);setDialog(null);
     }catch(error){setNotice(error instanceof Error?error.message:'Export failed.');}finally{setExporting(false);}
   }
   const floorPicker=<select className="floor-picker" aria-label="Select floor" value={floor.index} onChange={e=>switchFloor(Number(e.target.value))}>{[...plan.floors].reverse().map(f=><option key={f.index} value={f.index}>{f.name} · Y {f.elevation}</option>)}</select>;
